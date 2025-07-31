@@ -1,0 +1,10 @@
+openai
+requests
+python-dotenv
+pandas
+numpy
+matplotlib
+schedule
+python-dateutil
+krakenex
+tqdm
