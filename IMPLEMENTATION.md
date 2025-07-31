@@ -110,7 +110,8 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 | -------------------------- | ----------- | ----------------------------------------------------------------------------------- |
 | `bot/kraken_api.py`        | ✅ Complete | Fully implemented and unit-tested. Handles auth, rate limits, and required endpoints. |
 | `Tests/test_kraken_api.py` | ✅ Complete | Provides comprehensive test coverage for the Kraken API module using mocks.           |
-| `bot/decision_engine.py`   | ⏳ Pending  | Not started.                                                                        |
+| `bot/decision_engine.py`   | ✅ Complete | Queries OpenAI with context to get a JSON-formatted trading plan.                     |
+| `Tests/test_decision_engine.py` | ✅ Complete | Mocks external services to validate prompt generation and response parsing.         |
 | `bot/trade_executor.py`    | ⏳ Pending  | Not started.                                                                        |
 | `bot/performance_tracker.py`| ⏳ Pending  | Not started.                                                                        |
 | `scheduler.py`             | ⏳ Pending  | Not started.                                                                        |
