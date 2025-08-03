@@ -121,12 +121,13 @@ class DecisionEngine:
             logger.error(f"Error getting context: {e}")
             raise DecisionEngineError(f"Could not get context: {e}")
 
-    def _build_prompt(self, context: dict) -> str:
+    def _build_prompt(self, context: dict, research_report: str = "") -> str:
         """
         Assembles the final prompt using a template and dynamic context.
 
         Args:
             context: A dictionary with 'portfolio' and 'thesis' data.
+            research_report: Market research report from ResearchAgent.
 
         Returns:
             The complete prompt string to be sent to the AI.
@@ -143,6 +144,16 @@ class DecisionEngine:
         prompt = prompt_template.replace("Current cash: **$X USDC**.", context['portfolio'])
         prompt = prompt.replace("Previous thesis: **(insert last thesis summary)**.", f"Previous thesis: {context['thesis']}")
         
+        # Inject research report if available
+        if research_report.strip():
+            market_context_section = f"\n\n## Today's Market Intelligence\n\n{research_report}\n\n---\n"
+            # Insert the market context before the tasks section
+            if "**Tasks**" in prompt:
+                prompt = prompt.replace("**Tasks**", f"{market_context_section}**Tasks**")
+            else:
+                # Fallback: add it after the thesis
+                prompt = prompt.replace(f"Previous thesis: {context['thesis']}", f"Previous thesis: {context['thesis']}{market_context_section}")
+        
         # Add a specific instruction for the JSON output format right in the prompt
         json_format_instruction = (
             "\n\nIMPORTANT: Your entire response must be a single JSON object, without any surrounding text or markdown. "
@@ -153,7 +164,7 @@ class DecisionEngine:
         prompt += json_format_instruction
         return prompt
 
-    def generate_strategy(self) -> dict:
+    def generate_strategy(self, research_report: str = "") -> dict:
         """
         Builds the prompt, queries the OpenAI API, and returns a structured trading plan.
 
@@ -162,7 +173,7 @@ class DecisionEngine:
             Example: {'trades': [{'pair': 'XBT/USD', 'action': 'buy', 'volume': 0.1}], 'thesis': '...'}
         """
         context = self._get_context()
-        prompt = self._build_prompt(context)
+        prompt = self._build_prompt(context, research_report)
         
         logger.info("Generating AI strategy. Sending prompt to OpenAI...")
         logger.debug(f"Full prompt:\n{prompt}")

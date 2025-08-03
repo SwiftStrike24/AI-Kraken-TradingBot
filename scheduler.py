@@ -11,6 +11,7 @@ from bot.kraken_api import KrakenAPI, KrakenAPIError
 from bot.decision_engine import DecisionEngine, DecisionEngineError
 from bot.trade_executor import TradeExecutor
 from bot.performance_tracker import PerformanceTracker
+from bot.research_agent import ResearchAgent, ResearchAgentError
 
 # Set up logging to a file and to the console
 logging.basicConfig(
@@ -39,19 +40,32 @@ def run_trading_cycle():
         decision_engine = DecisionEngine(kraken_api)
         trade_executor = TradeExecutor(kraken_api)
         tracker = PerformanceTracker(kraken_api)
+        research_agent = ResearchAgent()
         logger.info("Modules initialized successfully.")
 
-        # 2. Get AI-powered trading strategy
-        logger.info("Generating AI trading strategy...")
-        trade_plan = decision_engine.generate_strategy()
+        # 2. Gather market intelligence
+        logger.info("Gathering market intelligence and research...")
+        try:
+            daily_research_report = research_agent.generate_daily_report()
+            logger.info("Market research report generated successfully.")
+        except ResearchAgentError as e:
+            logger.warning(f"Research agent encountered an error: {e}")
+            daily_research_report = "Market research temporarily unavailable due to data source issues."
+        except Exception as e:
+            logger.warning(f"Unexpected error in research agent: {e}")
+            daily_research_report = "Market research temporarily unavailable."
+
+        # 3. Get AI-powered trading strategy with market context
+        logger.info("Generating AI trading strategy with market intelligence...")
+        trade_plan = decision_engine.generate_strategy(research_report=daily_research_report)
         logger.info(f"AI strategy received. Thesis: {trade_plan.get('thesis')}")
 
-        # 3. Execute trades
+        # 4. Execute trades
         logger.info("Executing trades based on the AI plan...")
         execution_results = trade_executor.execute_trades(trade_plan)
         logger.info(f"Trade execution completed. Results: {execution_results}")
 
-        # 4. Log the results
+        # 5. Log the results
         logger.info("Logging cycle results...")
         # Log individual successful trades
         for result in execution_results:
@@ -65,7 +79,7 @@ def run_trading_cycle():
         tracker.log_thesis(trade_plan.get('thesis', 'No thesis was generated.'))
         logger.info("Logging complete.")
 
-    except (KrakenAPIError, DecisionEngineError) as e:
+    except (KrakenAPIError, DecisionEngineError, ResearchAgentError) as e:
         logger.critical(f"A critical, module-specific error occurred: {e}")
     except Exception as e:
         logger.critical(f"An unexpected error occurred during the trading cycle: {e}", exc_info=True)
