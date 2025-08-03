@@ -108,15 +108,47 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 
 | Module                     | Status      | Notes                                                                               |
 | -------------------------- | ----------- | ----------------------------------------------------------------------------------- |
-| `bot/kraken_api.py`        | ✅ Complete | Fully implemented and unit-tested. Handles auth, rate limits, and required endpoints. |
-| `Tests/test_kraken_api.py` | ✅ Complete | Provides comprehensive test coverage for the Kraken API module using mocks.           |
-| `bot/decision_engine.py`   | ✅ Complete | Queries OpenAI with context to get a JSON-formatted trading plan.                     |
-| `Tests/test_decision_engine.py` | ✅ Complete | Mocks external services to validate prompt generation and response parsing.         |
+| `bot/kraken_api.py`        | ✅ Complete | Fully implemented with robust asset pair handling. Fetches valid trading pairs on init and provides asset-to-pair mapping. |
+| `Tests/test_kraken_api.py` | ⚠️ Needs Update | Needs updates to test new asset pair fetching functionality.           |
+| `bot/decision_engine.py`   | ✅ Complete | Uses robust asset pair validation to avoid "Unknown asset pair" errors.                     |
+| `Tests/test_decision_engine.py` | ⚠️ Needs Update | Needs updates to mock new KrakenAPI methods.         |
 | `bot/trade_executor.py`    | ✅ Complete | Executes AI's trade plan using a safe, two-phase (validate-then-execute) process. |
 | `Tests/test_trade_executor.py` | ✅ Complete | Verifies that trade validation, execution, and error handling work correctly.       |
-| `bot/performance_tracker.py`| ✅ Complete | Logs trades, daily equity, and AI thesis to CSV and Markdown files.               |
-| `Tests/test_performance_tracker.py` | ✅ Complete | Verifies logging logic for equity, trades, and thesis without file I/O.             |
-| `scheduler.py`             | ✅ Complete | Orchestrates the daily trading cycle and manages the schedule.                      |
+| `bot/performance_tracker.py`| ✅ Complete | Uses robust asset pair validation for accurate equity calculations.               |
+| `Tests/test_performance_tracker.py` | ⚠️ Needs Update | Needs updates to test new asset pair handling logic.             |
+| `scheduler.py`             | ✅ Complete | Loads environment variables early before any imports for robust configuration.                      |
+
+---
+
+## 🔧 Recent Architecture Improvements (August 2025)
+
+### Asset Pair Handling
+- **Problem Solved:** "Unknown asset pair" errors when querying prices for assets in account balance
+- **Solution:** `KrakenAPI` now fetches all valid trading pairs on initialization and creates a mapping from assets to their correct USD pair names
+- **Benefits:** Eliminates guesswork, prevents API errors, supports all tradeable assets on Kraken
+
+### Configuration Loading
+- **Problem Solved:** Environment variables loaded inconsistently across modules
+- **Solution:** Centralized `.env` loading at the top of `scheduler.py` before any imports
+- **Benefits:** Predictable startup sequence, eliminates race conditions
+
+### Robust Error Handling
+- **Enhanced logging:** Added detailed logs showing which assets are found and which valid pairs are being used
+- **Graceful degradation:** Assets without USD pairs are logged but don't crash the system
+- **Fallback mechanisms:** Asset pair fetching failures fall back gracefully
+
+### Unicode/Encoding Fix
+- **Problem Solved:** Unicode decode errors when reading prompt templates and thesis files on Windows
+- **Solution:** Explicitly specify UTF-8 encoding for all file operations
+- **Benefits:** Cross-platform compatibility, handles emoji and special characters in files
+
+### Fiat Currency & Forex Handling
+- **Problem Solved:** Bot was trying to find USD/CHF prices for USD balances and including forex pairs
+- **Solution:** 
+  - Treat USD/USDC/USDT as cash at $1.00 per unit (no price lookup needed)
+  - Filter out forex currencies (CAD, EUR, GBP, etc.) from crypto trading pairs
+  - Exclude forex assets from equity calculations but log them for transparency
+- **Benefits:** Accurate portfolio valuation, cleaner logs, no spurious API calls for forex pairs
 
 ---
 

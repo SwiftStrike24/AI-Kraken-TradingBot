@@ -47,31 +47,68 @@ class DecisionEngine:
             if not balance:
                 portfolio_context = "Portfolio is currently empty. Cash on hand: 0 USDC."
             else:
-                usdc_balance = balance.pop('USDC', 0.0)
-                portfolio_context = f"Current cash balance: ${usdc_balance:,.2f} USDC.\n"
-                if balance: # If there are other assets
-                    tickers = [f"{coin}USD" for coin in balance.keys()]
-                    # Kraken uses XBT for Bitcoin
-                    tickers = [t.replace("BTCUSD", "XBTUSD") for t in tickers]
-                    prices = self.kraken_api.get_ticker_prices(tickers)
+                # Handle cash balances (treat as $1.00 per unit for USD-denominated assets)
+                cash_assets = {'USDC', 'USD', 'USDT'}
+                total_cash = 0.0
+                
+                for cash_asset in cash_assets:
+                    if cash_asset in balance:
+                        total_cash += balance.pop(cash_asset, 0.0)
+                
+                portfolio_context = f"Current cash balance: ${total_cash:,.2f} USD.\n"
+                
+                if balance: # If there are other crypto assets (excluding fiat)
+                    # Filter out forex assets that we don't want to trade
+                    forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
+                    crypto_assets = [asset for asset in balance.keys() if asset not in forex_assets]
                     
-                    portfolio_context += "Current Holdings:\n"
-                    for asset, amount in balance.items():
-                        pair_name = f"{asset}USD".upper()
-                        # Adjust for Kraken's pair naming conventions (e.g., XBT -> XXBTZUSD)
-                        kraken_pair = next((p for p in prices if asset in p and 'USD' in p), None)
-                        if kraken_pair and kraken_pair in prices:
-                            price = prices[kraken_pair]['price']
-                            value = amount * price
-                            portfolio_context += f"- {asset}: {amount:.6f} (Value: ${value:,.2f} @ ${price:,.2f})\n"
+                    logger.info(f"Crypto assets in balance: {crypto_assets}")
+                    if forex_assets.intersection(balance.keys()):
+                        logger.info(f"Forex assets found (excluded from trading): {forex_assets.intersection(balance.keys())}")
+                    
+                    if crypto_assets:
+                        valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
+                        logger.info(f"Valid USD pairs found: {valid_pairs}")
+                        
+                        if valid_pairs:
+                            prices = self.kraken_api.get_ticker_prices(valid_pairs)
+                            logger.info(f"Price data received for {len(prices)} pairs")
+                            
+                            portfolio_context += "Current Holdings:\n"
+                            for asset, amount in balance.items():
+                                if asset in crypto_assets:
+                                    # Find the corresponding USD pair for this crypto asset
+                                    asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
+                                    if asset_pair and asset_pair in prices:
+                                        price = prices[asset_pair]['price']
+                                        value = amount * price
+                                        portfolio_context += f"- {asset}: {amount:.6f} (Value: ${value:,.2f} @ ${price:,.2f})\n"
+                                    else:
+                                        portfolio_context += f"- {asset}: {amount:.6f} (No USD pair available)\n"
+                                        logger.warning(f"No valid USD pair found for crypto asset: {asset}")
+                                else:
+                                    # For forex assets, just show the amount without valuation
+                                    portfolio_context += f"- {asset}: {amount:.6f} (Forex - not traded)\n"
                         else:
-                            portfolio_context += f"- {asset}: {amount:.6f} (Price data not found)\n"
+                            portfolio_context += "Current Holdings:\n"
+                            for asset, amount in balance.items():
+                                if asset in crypto_assets:
+                                    portfolio_context += f"- {asset}: {amount:.6f} (No USD pair available)\n"
+                                else:
+                                    portfolio_context += f"- {asset}: {amount:.6f} (Forex - not traded)\n"
+                            logger.warning("No valid USD pairs found for any crypto assets in balance")
+                    else:
+                        # Only forex assets remain
+                        if balance:
+                            portfolio_context += "Current Holdings:\n"
+                            for asset, amount in balance.items():
+                                portfolio_context += f"- {asset}: {amount:.6f} (Forex - not traded)\n"
                 else:
                     portfolio_context += "No crypto assets held."
 
             # 2. Get the last thesis
             if os.path.exists(self.thesis_log_path):
-                with open(self.thesis_log_path, 'r') as f:
+                with open(self.thesis_log_path, 'r', encoding='utf-8') as f:
                     # Read all theses and grab the last one. Assumes theses are separated by '---'.
                     theses = f.read().split('---')
                     last_thesis = theses[-1].strip() if theses else "No previous thesis found."
@@ -94,7 +131,7 @@ class DecisionEngine:
         Returns:
             The complete prompt string to be sent to the AI.
         """
-        with open(self.prompt_template_path, 'r') as f:
+        with open(self.prompt_template_path, 'r', encoding='utf-8') as f:
             # Using the "deep-research" prompt as the primary template
             templates = f.read().split('##')
             prompt_template = next((p for p in templates if "All deep-research prompts" in p), "")

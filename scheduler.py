@@ -1,7 +1,10 @@
+# Load environment variables first, before any other imports
+from dotenv import load_dotenv
+load_dotenv()
+
 import schedule
 import time
 import logging
-from dotenv import load_dotenv
 
 # Import our bot components
 from bot.kraken_api import KrakenAPI, KrakenAPIError
@@ -76,8 +79,6 @@ def main():
     """
     Main function to set up the schedule and run the bot.
     """
-    # Load environment variables from .env file
-    load_dotenv()
     logger.info("Environment variables loaded.")
 
     # --- Schedule the Job ---

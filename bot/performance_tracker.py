@@ -75,26 +75,48 @@ class PerformanceTracker:
             balance = self.kraken_api.get_account_balance()
             total_equity = 0.0
 
-            # Start with cash balance
-            total_equity += balance.pop('USDC', 0.0)
+            # Start with cash balance (treat USD-denominated assets as $1.00 per unit)
+            cash_assets = {'USDC', 'USD', 'USDT'}
+            for cash_asset in cash_assets:
+                if cash_asset in balance:
+                    cash_amount = balance.pop(cash_asset, 0.0)
+                    total_equity += cash_amount
+                    logger.info(f"Cash {cash_asset}: ${cash_amount:.2f}")
 
-            if balance: # If there are crypto assets
-                # Prepare pairs for price fetching
-                pairs_to_fetch = [f"{asset}USD" for asset in balance.keys()]
-                pairs_to_fetch = [p.replace("BTCUSD", "XBTUSD") for p in pairs_to_fetch]
+            if balance: # If there are other assets
+                # Filter out forex assets that we don't want to include in equity calculation
+                forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
+                crypto_assets = [asset for asset in balance.keys() if asset not in forex_assets]
                 
-                prices = self.kraken_api.get_ticker_prices(pairs_to_fetch)
-                
-                for asset, amount in balance.items():
-                    # Find the corresponding Kraken pair name (e.g., 'XBT' -> 'XXBTZUSD')
-                    kraken_pair = next((p for p in prices if asset in p and 'USD' in p), None)
-                    if kraken_pair and kraken_pair in prices:
-                        price = prices[kraken_pair]['price']
-                        value = amount * price
-                        total_equity += value
-                        logger.info(f"Asset {asset}: {amount} * ${price:,.2f} = ${value:,.2f}")
+                if crypto_assets:
+                    valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
+                    
+                    if valid_pairs:
+                        prices = self.kraken_api.get_ticker_prices(valid_pairs)
+                        
+                        for asset, amount in balance.items():
+                            if asset in crypto_assets:
+                                # Find the corresponding USD pair for this crypto asset
+                                asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
+                                if asset_pair and asset_pair in prices:
+                                    price = prices[asset_pair]['price']
+                                    value = amount * price
+                                    total_equity += value
+                                    logger.info(f"Crypto {asset}: {amount} * ${price:,.2f} = ${value:,.2f}")
+                                else:
+                                    logger.warning(f"Could not find USD price for crypto asset {asset}. It will not be included in equity calculation.")
+                            else:
+                                # For forex assets, log but don't include in equity
+                                logger.info(f"Forex {asset}: {amount} (excluded from equity calculation)")
                     else:
-                        logger.warning(f"Could not find price for {asset}. It will not be included in equity calculation.")
+                        logger.warning("No valid USD pairs found for any crypto assets in balance")
+                        
+                # Log any remaining forex assets
+                forex_in_balance = forex_assets.intersection(balance.keys())
+                if forex_in_balance:
+                    for forex_asset in forex_in_balance:
+                        amount = balance[forex_asset]
+                        logger.info(f"Forex {forex_asset}: {amount} (excluded from equity calculation)")
             
             log_entry = {
                 'timestamp': datetime.utcnow().isoformat(),
@@ -121,7 +143,7 @@ class PerformanceTracker:
             new_thesis: The thesis string from the AI's response.
         """
         try:
-            with open(self.thesis_log_path, 'a') as f:
+            with open(self.thesis_log_path, 'a', encoding='utf-8') as f:
                 timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
                 f.write(f"## Thesis for {timestamp}\n\n")
                 f.write(f"{new_thesis}\n\n")

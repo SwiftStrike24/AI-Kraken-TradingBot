@@ -5,9 +5,6 @@ import hashlib
 import hmac
 import requests
 import urllib.parse
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class KrakenAPIError(Exception):
     """Custom exception for Kraken API errors."""
@@ -25,6 +22,10 @@ class KrakenAPI:
 
         if not self.api_key or not self.api_secret:
             raise ValueError("KRAKEN_API_KEY and KRAKEN_API_SECRET must be set in the .env file.")
+        
+        # Fetch and cache all available asset pairs
+        self.asset_pairs = self._fetch_asset_pairs()
+        self.asset_to_usd_pair_map = self._build_asset_to_usd_map()
 
     def _get_kraken_signature(self, url_path, data):
         """
@@ -78,6 +79,67 @@ class KrakenAPI:
                     continue
                 raise KrakenAPIError(f"Request failed: {e}. Response: {response_text}")
         raise KrakenAPIError(f"Failed to query API after {max_retries} retries.")
+
+    def _fetch_asset_pairs(self):
+        """
+        Fetches all available asset pairs from Kraken's API.
+        Returns a dictionary of pair data.
+        """
+        try:
+            return self._query_api('public', '/0/public/AssetPairs')
+        except Exception as e:
+            # Fallback to empty dict if we can't fetch pairs
+            return {}
+
+    def _build_asset_to_usd_map(self):
+        """
+        Creates a mapping from cleaned asset names to their USD trading pairs.
+        Only includes crypto assets, excludes forex pairs.
+        Example: {'XBT': 'XXBTZUSD', 'ETH': 'XETHZUSD'}
+        """
+        asset_map = {}
+        
+        # Forex currencies to exclude
+        forex_assets = {'USD', 'EUR', 'GBP', 'CAD', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
+        
+        for pair_name, pair_info in self.asset_pairs.items():
+            # Look for pairs that trade against USD/ZUSD
+            if ('USD' in pair_name or 'ZUSD' in pair_name):
+                # Extract the base asset from the pair info
+                base_asset = pair_info.get('base', '')
+                quote_asset = pair_info.get('quote', '')
+                
+                # Clean the asset names (remove X/Z prefixes)
+                if base_asset.startswith(('X', 'Z')) and len(base_asset) > 1:
+                    clean_base = base_asset[1:]
+                else:
+                    clean_base = base_asset
+                
+                if quote_asset.startswith(('X', 'Z')) and len(quote_asset) > 1:
+                    clean_quote = quote_asset[1:]
+                else:
+                    clean_quote = quote_asset
+                
+                # Only include if base is not forex and quote is USD
+                if (clean_base not in forex_assets and 
+                    clean_quote == 'USD' and 
+                    clean_base and 
+                    clean_base not in asset_map):
+                    asset_map[clean_base] = pair_name
+        
+        return asset_map
+
+    def get_valid_usd_pairs_for_assets(self, assets):
+        """
+        Given a list of asset names, returns only the valid USD trading pairs.
+        Input: ['XBT', 'ETH', 'INVALID_ASSET']
+        Output: ['XXBTZUSD', 'XETHZUSD']
+        """
+        valid_pairs = []
+        for asset in assets:
+            if asset in self.asset_to_usd_pair_map:
+                valid_pairs.append(self.asset_to_usd_pair_map[asset])
+        return valid_pairs
 
     def get_account_balance(self):
         """
