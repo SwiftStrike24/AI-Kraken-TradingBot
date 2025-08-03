@@ -126,13 +126,15 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 | -------------------------- | ----------- | ----------------------------------------------------------------------------------- |
 | `bot/kraken_api.py`        | ✅ Complete | Fully implemented with robust asset pair handling. Fetches valid trading pairs on init and provides asset-to-pair mapping. |
 | `Tests/test_kraken_api.py` | ⚠️ Needs Update | Needs updates to test new asset pair fetching functionality.           |
-| `bot/decision_engine.py`   | ✅ Complete | Enhanced to accept and integrate market research reports into AI prompts.                     |
-| `Tests/test_decision_engine.py` | ⚠️ Needs Update | Needs updates to test new research report integration.         |
+| `bot/prompt_engine.py`     | ✅ Complete | **NEW:** Advanced prompt engineering module with template management, intelligent truncation, and future-proofing for performance feedback loops. |
+| `Tests/test_prompt_engine.py` | ✅ Complete | **NEW:** Comprehensive tests for all prompt engine functionality including truncation, logging, and error handling. |
+| `bot/decision_engine.py`   | ✅ Complete | Refactored to delegate prompt creation to PromptEngine for improved modularity and advanced prompt engineering capabilities. |
+| `Tests/test_decision_engine.py` | ⚠️ Needs Update | Needs updates to test new PromptEngine integration.         |
 | `bot/trade_executor.py`    | ✅ Complete | Executes AI's trade plan using a safe, two-phase (validate-then-execute) process. |
 | `Tests/test_trade_executor.py` | ✅ Complete | Verifies that trade validation, execution, and error handling work correctly.       |
 | `bot/performance_tracker.py`| ✅ Complete | Uses robust asset pair validation for accurate equity calculations.               |
 | `Tests/test_performance_tracker.py` | ⚠️ Needs Update | Needs updates to test new asset pair handling logic.             |
-| `bot/research_agent.py`    | ✅ Complete | New module that gathers market intelligence from RSS feeds and web sources.        |
+| `bot/research_agent.py`    | ✅ Complete | Module that gathers market intelligence from RSS feeds and web sources.        |
 | `Tests/test_research_agent.py` | ✅ Complete | Comprehensive tests for research agent functionality and error handling.         |
 | `scheduler.py`             | ✅ Complete | Updated to orchestrate research agent before decision engine. Robust error handling for all modules.                      |
 
@@ -186,6 +188,17 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 - **Rate Limiting:** Respectful request timing to avoid IP blocks
 - **Error Resilience:** Individual source failures don't crash the entire research process
 - **Structured Output:** Generates clean, markdown-formatted reports for AI consumption
+
+### Advanced Prompt Engineering Architecture (August 2025)
+- **Problem Solved:** Monolithic prompt building was brittle and hard to maintain
+- **Solution:** Dedicated `PromptEngine` module with template-based architecture
+- **Key Features:**
+  - **Professional Template System:** XML-tagged prompt structure for clarity and consistency
+  - **Intelligent Truncation:** Smart research report truncation preserving header and recent content
+  - **Performance Feedback Loop:** Infrastructure for thesis accuracy tracking (V2 enhancement)
+  - **Comprehensive Logging:** All prompts logged with timestamps for debugging and audit
+  - **Future-Proofing:** Ready for OpenAI tool use and function calling integration
+- **Benefits:** Improved prompt reliability, better AI responses, easier maintenance and iteration
 
 ---
 

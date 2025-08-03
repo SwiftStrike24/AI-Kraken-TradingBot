@@ -4,6 +4,7 @@ import logging
 from openai import OpenAI, APIError
 
 from bot.kraken_api import KrakenAPI
+from bot.prompt_engine import PromptEngine, PromptEngineError
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -30,8 +31,13 @@ class DecisionEngine:
         except Exception as e:
             raise DecisionEngineError(f"Failed to initialize OpenAI client: {e}")
         
-        # Define paths for prompt templates and logs
-        self.prompt_template_path = "Experiment-Details/Prompts.md"
+        # Initialize the advanced prompt engine
+        try:
+            self.prompt_engine = PromptEngine()
+        except PromptEngineError as e:
+            raise DecisionEngineError(f"Failed to initialize PromptEngine: {e}")
+        
+        # Define paths for logs
         self.thesis_log_path = "logs/thesis_log.md"
 
     def _get_context(self) -> dict:
@@ -121,64 +127,32 @@ class DecisionEngine:
             logger.error(f"Error getting context: {e}")
             raise DecisionEngineError(f"Could not get context: {e}")
 
-    def _build_prompt(self, context: dict, research_report: str = "") -> str:
-        """
-        Assembles the final prompt using a template and dynamic context.
 
-        Args:
-            context: A dictionary with 'portfolio' and 'thesis' data.
-            research_report: Market research report from ResearchAgent.
-
-        Returns:
-            The complete prompt string to be sent to the AI.
-        """
-        with open(self.prompt_template_path, 'r', encoding='utf-8') as f:
-            # Using the "deep-research" prompt as the primary template
-            templates = f.read().split('##')
-            prompt_template = next((p for p in templates if "All deep-research prompts" in p), "")
-
-        if not prompt_template:
-            raise FileNotFoundError("Could not find the deep-research prompt template.")
-            
-        # Inject dynamic data
-        prompt = prompt_template.replace("Current cash: **$X USDC**.", context['portfolio'])
-        prompt = prompt.replace("Previous thesis: **(insert last thesis summary)**.", f"Previous thesis: {context['thesis']}")
-        
-        # Inject research report if available
-        if research_report.strip():
-            market_context_section = f"\n\n## Today's Market Intelligence\n\n{research_report}\n\n---\n"
-            # Insert the market context before the tasks section
-            if "**Tasks**" in prompt:
-                prompt = prompt.replace("**Tasks**", f"{market_context_section}**Tasks**")
-            else:
-                # Fallback: add it after the thesis
-                prompt = prompt.replace(f"Previous thesis: {context['thesis']}", f"Previous thesis: {context['thesis']}{market_context_section}")
-        
-        # Add a specific instruction for the JSON output format right in the prompt
-        json_format_instruction = (
-            "\n\nIMPORTANT: Your entire response must be a single JSON object, without any surrounding text or markdown. "
-            "The JSON object must have two keys: 'trades' and 'thesis'.\n"
-            "'trades' should be a list of objects, where each object has 'pair' (e.g., 'XBT/USD'), 'action' ('buy' or 'sell'), and 'volume' (as a float).\n"
-            "'thesis' should be a string containing your updated investment thesis."
-        )
-        prompt += json_format_instruction
-        return prompt
 
     def generate_strategy(self, research_report: str = "") -> dict:
         """
-        Builds the prompt, queries the OpenAI API, and returns a structured trading plan.
+        Builds the prompt using PromptEngine, queries the OpenAI API, and returns a structured trading plan.
+
+        Args:
+            research_report: Market research report from ResearchAgent.
 
         Returns:
             A dictionary containing the AI's trading plan and new thesis.
             Example: {'trades': [{'pair': 'XBT/USD', 'action': 'buy', 'volume': 0.1}], 'thesis': '...'}
         """
-        context = self._get_context()
-        prompt = self._build_prompt(context, research_report)
-        
-        logger.info("Generating AI strategy. Sending prompt to OpenAI...")
-        logger.debug(f"Full prompt:\n{prompt}")
-
         try:
+            # Get context and build prompt using the advanced PromptEngine
+            context = self._get_context()
+            prompt = self.prompt_engine.build_prompt(
+                portfolio_context=context['portfolio'],
+                research_report=research_report,
+                last_thesis=context['thesis']
+            )
+            
+            logger.info("Generating AI strategy using PromptEngine. Sending prompt to OpenAI...")
+            logger.debug(f"Full prompt:\n{prompt}")
+
+            # Call OpenAI API with the structured prompt
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
@@ -189,15 +163,18 @@ class DecisionEngine:
             logger.info("Received raw response from OpenAI.")
             logger.debug(f"Raw response content:\n{response_content}")
 
+            # Parse and validate the response
             decision = json.loads(response_content)
             
-            # Basic validation of the returned structure
             if 'trades' not in decision or 'thesis' not in decision:
                 raise DecisionEngineError("AI response is missing 'trades' or 'thesis' key.")
 
             logger.info("Successfully parsed AI strategy.")
             return decision
 
+        except PromptEngineError as e:
+            logger.error(f"PromptEngine error: {e}")
+            raise DecisionEngineError(f"PromptEngine error: {e}")
         except APIError as e:
             logger.error(f"OpenAI API error: {e}")
             raise DecisionEngineError(f"OpenAI API error: {e}")
