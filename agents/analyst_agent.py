@@ -1,0 +1,336 @@
+"""
+Analyst Agent (Market Intelligence Specialist)
+
+This agent specializes in gathering and processing real-time market intelligence
+from multiple sources including news feeds, regulatory updates, and macro data.
+
+It replaces the monolithic research_agent.py with a more focused, cognitive approach
+that provides transparent reasoning about market conditions.
+"""
+
+import logging
+from typing import Dict, Any
+from datetime import datetime
+
+from .base_agent import BaseAgent
+from bot.research_agent import ResearchAgent, ResearchAgentError
+
+logger = logging.getLogger(__name__)
+
+class AnalystAgent(BaseAgent):
+    """
+    The Analyst-AI specializes in market intelligence gathering.
+    
+    This agent:
+    1. Gathers crypto news headlines from RSS feeds
+    2. Collects macro/regulatory updates
+    3. Synthesizes market context and sentiment
+    4. Provides structured intelligence reports to the Strategist-AI
+    """
+    
+    def __init__(self, logs_dir: str = "logs", session_dir: str = None):
+        """
+        Initialize the Analyst Agent.
+        
+        Args:
+            logs_dir: Directory for saving agent transcripts
+            session_dir: Optional session directory for unified transcript storage
+        """
+        super().__init__("Analyst-AI", logs_dir, session_dir)
+        
+        # Initialize the underlying research engine
+        try:
+            self.research_engine = ResearchAgent(logs_dir)
+            self.logger.info("Research engine initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize research engine: {e}")
+            raise
+    
+    def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute market intelligence gathering and analysis.
+        
+        Args:
+            inputs: Control inputs from Supervisor (typically contains directives)
+            
+        Returns:
+            Structured research report with market intelligence
+        """
+        self.logger.info("Beginning market intelligence gathering...")
+        
+        # Extract any specific research directives
+        research_focus = inputs.get('research_focus', 'general_market_analysis')
+        priority_keywords = inputs.get('priority_keywords', [])
+        
+        try:
+            # Generate the comprehensive research report
+            raw_report = self.research_engine.generate_daily_report()
+            
+            # Process and structure the report
+            structured_report = self._structure_report(raw_report, research_focus, priority_keywords)
+            
+            self.logger.info("Market intelligence gathering completed successfully")
+            
+            return {
+                "status": "success",
+                "agent": "Analyst-AI",
+                "timestamp": datetime.now().isoformat(),
+                "research_report": structured_report,
+                "raw_report": raw_report,
+                "research_focus": research_focus,
+                "priority_keywords": priority_keywords,
+                "intelligence_quality": self._assess_intelligence_quality(structured_report)
+            }
+            
+        except ResearchAgentError as e:
+            self.logger.error(f"Research engine error: {e}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Unexpected error during market analysis: {e}")
+            raise
+    
+    def _structure_report(self, raw_report: str, focus: str, keywords: list) -> Dict[str, Any]:
+        """
+        Structure the raw research report into organized intelligence categories.
+        
+        Args:
+            raw_report: Raw markdown report from research engine
+            focus: Research focus area
+            keywords: Priority keywords to highlight
+            
+        Returns:
+            Structured intelligence report
+        """
+        # Parse the report sections
+        sections = self._parse_report_sections(raw_report)
+        
+        # Analyze sentiment and key themes
+        sentiment_analysis = self._analyze_market_sentiment(sections)
+        key_themes = self._extract_key_themes(sections, keywords)
+        
+        return {
+            "crypto_headlines": sections.get("crypto_news", []),
+            "macro_updates": sections.get("macro_news", []),
+            "market_context": sections.get("market_summary", ""),
+            "sentiment_analysis": sentiment_analysis,
+            "key_themes": key_themes,
+            "research_focus": focus,
+            "total_headlines": len(sections.get("crypto_news", [])) + len(sections.get("macro_news", [])),
+            "generation_timestamp": datetime.now().isoformat()
+        }
+    
+    def _parse_report_sections(self, raw_report: str) -> Dict[str, Any]:
+        """
+        Parse the markdown report into structured sections.
+        
+        Args:
+            raw_report: Raw markdown report
+            
+        Returns:
+            Dictionary of parsed sections
+        """
+        sections = {
+            "crypto_news": [],
+            "macro_news": [],
+            "market_summary": ""
+        }
+        
+        lines = raw_report.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            
+            if "Crypto News Headlines" in line:
+                current_section = "crypto_news"
+            elif "Macro & Regulatory Updates" in line:
+                current_section = "macro_news"
+            elif "Market Context" in line:
+                current_section = "market_summary"
+            elif line.startswith("- ") and current_section in ["crypto_news", "macro_news"]:
+                sections[current_section].append(line[2:])  # Remove "- " prefix
+            elif current_section == "market_summary" and line and not line.startswith("#"):
+                sections["market_summary"] += line + " "
+        
+        # Clean up market summary
+        sections["market_summary"] = sections["market_summary"].strip()
+        
+        return sections
+    
+    def _analyze_market_sentiment(self, sections: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Analyze overall market sentiment from news headlines.
+        
+        Args:
+            sections: Parsed report sections
+            
+        Returns:
+            Sentiment analysis results
+        """
+        # Simple sentiment keywords (can be enhanced with ML in the future)
+        positive_keywords = [
+            'surge', 'rally', 'bullish', 'gains', 'up', 'rise', 'boost', 'positive',
+            'adoption', 'approval', 'breakthrough', 'milestone', 'record', 'high'
+        ]
+        
+        negative_keywords = [
+            'crash', 'dump', 'bearish', 'decline', 'fall', 'drop', 'sell-off',
+            'negative', 'concern', 'risk', 'warning', 'ban', 'restriction', 'hack'
+        ]
+        
+        all_headlines = sections.get("crypto_news", []) + sections.get("macro_news", [])
+        total_headlines = len(all_headlines)
+        
+        if total_headlines == 0:
+            return {"sentiment": "neutral", "confidence": 0.0, "reasoning": "No headlines to analyze"}
+        
+        positive_count = 0
+        negative_count = 0
+        
+        for headline in all_headlines:
+            headline_lower = headline.lower()
+            
+            for keyword in positive_keywords:
+                if keyword in headline_lower:
+                    positive_count += 1
+                    break
+            
+            for keyword in negative_keywords:
+                if keyword in headline_lower:
+                    negative_count += 1
+                    break
+        
+        # Calculate sentiment
+        sentiment_score = (positive_count - negative_count) / total_headlines
+        
+        if sentiment_score > 0.1:
+            sentiment = "bullish"
+        elif sentiment_score < -0.1:
+            sentiment = "bearish"
+        else:
+            sentiment = "neutral"
+        
+        confidence = min(abs(sentiment_score) * 2, 1.0)  # Scale to 0-1
+        
+        return {
+            "sentiment": sentiment,
+            "confidence": round(confidence, 2),
+            "positive_signals": positive_count,
+            "negative_signals": negative_count,
+            "total_headlines": total_headlines,
+            "reasoning": f"Analyzed {total_headlines} headlines: {positive_count} positive, {negative_count} negative signals"
+        }
+    
+    def _extract_key_themes(self, sections: Dict[str, Any], priority_keywords: list) -> list:
+        """
+        Extract key themes and topics from the intelligence report.
+        
+        Args:
+            sections: Parsed report sections
+            priority_keywords: Keywords to prioritize
+            
+        Returns:
+            List of key themes found in the intelligence
+        """
+        # Common crypto themes to track
+        theme_keywords = {
+            "bitcoin": ["bitcoin", "btc", "xbt"],
+            "ethereum": ["ethereum", "eth", "ether"],
+            "regulation": ["sec", "regulation", "regulatory", "compliance", "legal"],
+            "institutional": ["institutional", "etf", "grayscale", "blackrock", "corporate"],
+            "defi": ["defi", "decentralized finance", "uniswap", "compound"],
+            "fed_policy": ["fed", "federal reserve", "interest rate", "monetary policy"],
+            "inflation": ["inflation", "cpi", "pce", "prices"],
+            "market_structure": ["market", "trading", "volume", "liquidity"]
+        }
+        
+        # Add priority keywords as their own themes
+        for keyword in priority_keywords:
+            theme_keywords[keyword.lower()] = [keyword.lower()]
+        
+        all_text = " ".join(sections.get("crypto_news", []) + sections.get("macro_news", []) + [sections.get("market_summary", "")])
+        all_text_lower = all_text.lower()
+        
+        detected_themes = []
+        
+        for theme, keywords in theme_keywords.items():
+            mentions = 0
+            for keyword in keywords:
+                mentions += all_text_lower.count(keyword)
+            
+            if mentions > 0:
+                detected_themes.append({
+                    "theme": theme,
+                    "mentions": mentions,
+                    "relevance": "high" if mentions >= 3 else "medium" if mentions >= 2 else "low"
+                })
+        
+        # Sort by number of mentions
+        detected_themes.sort(key=lambda x: x["mentions"], reverse=True)
+        
+        return detected_themes[:10]  # Return top 10 themes
+    
+    def _assess_intelligence_quality(self, report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Assess the quality and completeness of the gathered intelligence.
+        
+        Args:
+            report: Structured intelligence report
+            
+        Returns:
+            Quality assessment metrics
+        """
+        crypto_headlines = len(report.get("crypto_headlines", []))
+        macro_headlines = len(report.get("macro_updates", []))
+        total_headlines = crypto_headlines + macro_headlines
+        
+        # Quality scoring
+        if total_headlines >= 15:
+            quality_score = "excellent"
+        elif total_headlines >= 10:
+            quality_score = "good"
+        elif total_headlines >= 5:
+            quality_score = "fair"
+        else:
+            quality_score = "poor"
+        
+        return {
+            "quality_score": quality_score,
+            "total_headlines": total_headlines,
+            "crypto_coverage": crypto_headlines,
+            "macro_coverage": macro_headlines,
+            "market_context_available": bool(report.get("market_context")),
+            "sentiment_confidence": report.get("sentiment_analysis", {}).get("confidence", 0.0),
+            "themes_detected": len(report.get("key_themes", []))
+        }
+    
+    def generate_reasoning(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> str:
+        """
+        Generate detailed reasoning about the intelligence gathering process.
+        
+        Args:
+            inputs: Input directives from supervisor
+            outputs: Generated intelligence report
+            
+        Returns:
+            Natural language explanation of the analysis process
+        """
+        if outputs.get("status") == "error":
+            return f"Market intelligence gathering failed due to: {outputs.get('error_message', 'unknown error')}. This will impact the trading decision quality."
+        
+        report = outputs.get("research_report", {})
+        quality = outputs.get("intelligence_quality", {})
+        
+        reasoning = f"""
+        Market Intelligence Analysis Completed:
+        
+        1. Data Collection: Successfully gathered {quality.get('total_headlines', 0)} headlines from crypto and macro sources
+        2. Coverage Quality: {quality.get('quality_score', 'unknown')} - {quality.get('crypto_coverage', 0)} crypto stories, {quality.get('macro_coverage', 0)} macro updates
+        3. Sentiment Analysis: Market sentiment appears {report.get('sentiment_analysis', {}).get('sentiment', 'neutral')} with {report.get('sentiment_analysis', {}).get('confidence', 0.0)*100:.0f}% confidence
+        4. Key Themes: Detected {len(report.get('key_themes', []))} major themes including focus on {', '.join([theme['theme'] for theme in report.get('key_themes', [])[:3]])}
+        5. Strategic Impact: This intelligence provides {quality.get('quality_score', 'limited')} market context for trading decisions
+        
+        The research focus was '{inputs.get('research_focus', 'general')}' and the intelligence quality meets requirements for proceeding to strategy formulation.
+        """
+        
+        return reasoning.strip()

@@ -29,8 +29,12 @@ def run_trading_cycle():
     Orchestrates the entire daily trading cycle, from getting a strategy to execution and logging.
     This function is designed to be the single entry point for a scheduled job.
     """
+    logger.warning("🚨 DEPRECATED SCHEDULER DETECTED!")
+    logger.warning("This legacy scheduler has been replaced by the new multi-agent system.")
+    logger.warning("Please use 'python scheduler_multiagent.py' instead.")
+    logger.warning("Legacy execution will continue but may overwrite multi-agent reports...")
     logger.info("==========================================================")
-    logger.info("🚀 STARTING NEW TRADING CYCLE 🚀")
+    logger.info("🚀 STARTING NEW TRADING CYCLE (DEPRECATED) 🚀")
     logger.info("==========================================================")
 
     try:

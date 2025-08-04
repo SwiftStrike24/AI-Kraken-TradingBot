@@ -4,3 +4,5 @@ __pycache__/
 
 logs/prompts/
 logs/research_cache.json 
+
+logs/agent_transcripts/

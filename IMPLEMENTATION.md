@@ -18,6 +18,7 @@ Initial balance: **\$100.00 USDC**
 
 ## ⚙️ Architecture Overview
 
+### Legacy Monolithic Architecture (Pre-August 2025)
 ```
 Scheduler (daily)
    └── Research Agent → Gather market intelligence (news, sentiment, macro)
@@ -27,6 +28,28 @@ Scheduler (daily)
                    └── Parse response (BUY/SELL plan)
                        └── Execute trades via Kraken API
                            └── Log to CSV + update equity curve
+```
+
+### New Multi-Agent Architecture (August 2025+)
+```
+Scheduler (daily)
+   └── Supervisor-AI (Central Orchestrator)
+       ├── Analyst-AI → Market Intelligence & Sentiment Analysis
+       │   ├── RSS Feed Aggregation (Crypto + Macro News from Unbiased/Right-leaning Sources)
+       │   ├── Keyword Filtering & Content Processing  
+       │   └── Structured Intelligence Reports
+       ├── Strategist-AI → Advanced Prompt Engineering
+       │   ├── Portfolio Context Assembly
+       │   ├── Performance History Integration
+       │   └── Optimized AI Prompt Construction
+       ├── Trader-AI → AI Execution & Decision Parsing
+       │   ├── OpenAI API Calls (GPT-4o)
+       │   ├── Response Validation & Parsing
+       │   └── Quality Assessment & Risk Analysis
+       └── Final Review & Trade Execution
+           ├── Supervisor Validation & Approval
+           ├── Trade Execution (if approved)
+           └── Performance Tracking & Cognitive Logging
 ```
 
 ---
@@ -47,31 +70,61 @@ Scheduler (daily)
 
 ## 📂 Project Structure
 
+### Legacy Structure (Pre-August 2025)
 ```
 chatgpt-kraken-bot/
 ├── bot/
 │   ├── kraken_api.py
-│   ├── decision_engine.py
+│   ├── decision_engine.py        # ⚠️ DEPRECATED - replaced by Trader-AI
 │   ├── trade_executor.py
 │   ├── performance_tracker.py
-│   └── research_agent.py
-├── Tests/
-│   ├── test_kraken_api.py
-│   ├── test_decision_engine.py
-│   ├── test_trade_executor.py
-│   ├── test_performance_tracker.py
-│   └── test_research_agent.py
+│   ├── research_agent.py         # ⚠️ DEPRECATED - replaced by Analyst-AI  
+│   └── prompt_engine.py          # ⚠️ DEPRECATED - replaced by Strategist-AI
+├── Tests/ [legacy test files]
+├── logs/ [CSV logs]
+├── scheduler.py                  # ⚠️ DEPRECATED - use scheduler_multiagent.py
+└── run_trading_demo.py           # ⚠️ DEPRECATED - use run_multiagent_demo.py
+```
+
+### New Multi-Agent Structure (August 2025+)
+```
+chatgpt-kraken-bot/
+├── agents/                       # 🆕 MULTI-AGENT SYSTEM
+│   ├── __init__.py
+│   ├── base_agent.py            # Common agent functionality
+│   ├── supervisor_agent.py      # Central orchestrator
+│   ├── analyst_agent.py         # Market intelligence specialist
+│   ├── strategist_agent.py      # Prompt engineering specialist
+│   └── trader_agent.py          # AI execution specialist
+├── bot/                         # Core trading infrastructure
+│   ├── kraken_api.py            # ✅ ACTIVE
+│   ├── trade_executor.py        # ✅ ACTIVE  
+│   ├── performance_tracker.py   # ✅ ACTIVE
+│   └── [deprecated modules]
 ├── logs/
-│   ├── trades.csv
-│   ├── equity.csv
-│   ├── thesis_log.md
-│   ├── daily_research_report.md
-│   └── research_cache.json
+│   ├── agent_transcripts/       # 🆕 Cognitive audit trails
+│   │   └── {YYYY-MM-DD}/
+│   │       ├── analyst_thoughts_{timestamp}.json
+│   │       ├── analyst_output_{timestamp}.json
+│   │       ├── strategist_thoughts_{timestamp}.json
+│   │       ├── strategist_output_{timestamp}.json
+│   │       ├── trader_thoughts_{timestamp}.json
+│   │       ├── trader_output_{timestamp}.json
+│   │       ├── supervisor_thoughts_{timestamp}.json
+│   │       └── supervisor_output_{timestamp}.json
+│   ├── trades.csv               # ✅ ACTIVE
+│   ├── equity.csv               # ✅ ACTIVE
+│   ├── thesis_log.md            # ✅ ACTIVE
+│   ├── daily_research_report.md # ✅ ACTIVE
+│   ├── scheduler_multiagent.log # 🆕 Multi-agent logs
+│   └── research_cache.json      # ✅ ACTIVE
+├── Tests/                       # 🔄 TO BE UPDATED for multi-agent
 ├── .env
 ├── requirements.txt
-├── scheduler.py
+├── scheduler_multiagent.py      # 🆕 NEW PRODUCTION SCHEDULER
+├── run_multiagent_demo.py       # 🆕 NEW DEMO RUNNER
 ├── README.md
-└── implementation.md
+└── IMPLEMENTATION.md            # 🔄 UPDATED DOCUMENTATION
 ```
 
 ---
@@ -175,7 +228,16 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 - **Solution:** Added comprehensive research agent that gathers market intelligence before each trading decision
 - **Features:**
   - RSS feed aggregation from major crypto news sources (CoinDesk, CoinTelegraph, The Block, etc.)
-  - Macroeconomic and regulatory news filtering
+  - Macroeconomic and regulatory news from **full political spectrum** for balanced analysis:
+    - **Centrist/Unbiased:** MarketWatch (financial news leader)
+    - **Conservative/Right-leaning:** National Review, Reason Magazine, AEI, Manhattan Institute, Mises Institute  
+    - **Liberal/Left-leaning:** NPR (News, All Things Considered, Planet Money), Washington Post Business, Mother Jones
+  - **Balanced approach:** AI receives perspectives from all major political viewpoints to make truly informed decisions
+  - **AI-Powered Market Analysis:** OpenAI GPT-4o synthesizes all gathered headlines into actionable market insights
+    - Identifies key market themes and sentiment
+    - Highlights regulatory and macroeconomic factors
+    - Provides specific opportunities and risks for traders
+    - Professional-grade analysis comparable to financial research firms
   - Intelligent keyword-based content filtering
   - Caching system to prevent duplicate processing
   - Robust error handling with graceful degradation
@@ -202,4 +264,67 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 
 ---
 
-##
+## 🤖 Multi-Agent Architecture Implementation (August 2025)
+
+### Revolutionary Architecture Upgrade
+
+The trading bot has been upgraded from a monolithic pipeline to a sophisticated multi-agent system based on the latest research in AI coordination and cognitive architecture. This upgrade addresses the key challenges identified in modern multi-agent literature.
+
+**Key Principles Implemented:**
+- **Centralized Orchestration**: The Supervisor-AI ensures shared context and prevents agent fragmentation
+- **Cognitive Transparency**: Every agent logs its complete thought process for audit and debugging
+- **Specialized Intelligence**: Each agent focuses on a specific cognitive task with deep expertise
+- **Robust Error Handling**: Individual agent failures don't crash the entire system
+- **Context Preservation**: All agents operate with shared context to maintain coherent decision-making
+
+### Agent Specifications
+
+| Agent | Role | Cognitive Function | Input | Output |
+|-------|------|-------------------|-------|--------|
+| **Supervisor-AI** | Central Orchestrator | Pipeline management, final validation, trade approval | Initial cycle trigger | Complete execution results |
+| **Analyst-AI** | Market Intelligence | News aggregation, sentiment analysis, trend identification | Research directives | Structured intelligence report |
+| **Strategist-AI** | Prompt Engineering | Context assembly, prompt optimization, strategy formulation | Intelligence + portfolio data | Optimized AI prompt payload |
+| **Trader-AI** | AI Execution | OpenAI API calls, response parsing, quality assessment | Prompt payload | Validated trading plan |
+
+### Communication Protocol
+
+All inter-agent communication follows a standardized JSON format with complete audit trails and cognitive transparency logging.
+
+### Cognitive Logging System
+
+Each agent maintains complete cognitive transparency through timestamped transcript files in `logs/agent_transcripts/{YYYY-MM-DD}/`.
+
+### Pipeline State Management
+
+The Supervisor-AI manages pipeline execution through well-defined states: IDLE → RUNNING_ANALYST → RUNNING_STRATEGIST → RUNNING_TRADER → REVIEWING_PLAN → EXECUTING_TRADES → COMPLETED.
+
+### Quality Assurance & Validation
+
+The multi-agent system implements comprehensive quality controls at each stage with metrics for intelligence quality, strategy confidence, decision quality, and risk assessment.
+
+### Deployment Instructions
+
+**New Production Scheduler:**
+```bash
+python scheduler_multiagent.py
+```
+
+**Demo and Testing:**
+```bash
+python run_multiagent_demo.py
+```
+
+**Single Demo Run:**
+```bash
+python scheduler_multiagent.py demo
+```
+
+### Migration from Legacy System
+
+The new multi-agent system maintains backward compatibility while providing enhanced capabilities:
+- Legacy modules remain functional during transition
+- Enhanced cognitive transparency and audit trails
+- Improved error handling and resilience
+- Better AI decision quality through specialized agents
+
+---
