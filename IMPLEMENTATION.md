@@ -3,9 +3,21 @@
 
 ## 🧠 Concept
 
-A fully autonomous crypto trading bot powered by ChatGPT 4o.
-It runs daily at 07:00 AM MST, evaluates the market, and rebalances a portfolio of Kraken-listed tokens with the goal of generating consistent alpha vs BTC and ETH.
+A fully autonomous crypto trading bot powered by ChatGPT 4o with institutional-grade market intelligence.
+It runs daily at 07:00 AM MST, evaluates the market using real-time data and comprehensive news analysis, and rebalances a portfolio of Kraken-listed tokens with the goal of generating consistent alpha vs BTC and ETH.
 The strategy is experimental, transparent, and performance-logged.
+
+## ⚡ Latest Enhancements (August 2025)
+
+**🚀 Major Upgrade:** Multi-agent architecture with real-time market data integration and institutional-grade AI analysis
+
+**Key Improvements:**
+- **CoinGecko Integration:** Live price data, trending analysis, and market metrics for 10 tracked cryptocurrencies
+- **Enhanced Keyword Intelligence:** 57 crypto + 81 macro keywords capturing ETFs, institutional flows, Fed policy, and regulatory developments
+- **OpenAI 2025 Best Practices:** Professional prompt optimization with role definition, task specificity, and institutional output format
+- **Multi-Source Intelligence:** Combines quantitative CoinGecko data with qualitative news analysis for superior market context
+- **Comprehensive Coverage:** Now captures BlackRock ETF flows, MicroStrategy moves, Fed decisions, GENIUS/CLARITY Act developments, and macro trends
+- **Professional Analysis:** Institutional morning briefing format with confidence levels and specific trading opportunities
 
 ---
 
@@ -232,26 +244,33 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
   - Exclude forex assets from equity calculations but log them for transparency
 - **Benefits:** Accurate portfolio valuation, cleaner logs, no spurious API calls for forex pairs
 
-### AI Research Agent Integration (August 2025)
+### AI Research Agent Integration (August 2025) - ENHANCED
 - **Problem Solved:** Decision engine was operating in a "portfolio vacuum" without real-world market context
-- **Solution:** Added comprehensive research agent that gathers market intelligence before each trading decision
-- **Features:**
-  - RSS feed aggregation from major crypto news sources (CoinDesk, CoinTelegraph, The Block, etc.)
-  - Macroeconomic and regulatory news from **full political spectrum** for balanced analysis:
+- **Solution:** Added comprehensive research agent with advanced keyword filtering and CoinGecko integration
+- **Enhanced Features (August 2025):**
+  - **Advanced Keyword Filtering System:**
+    - **57 Crypto Keywords:** Covering all tracked assets (BTC, ETH, SOL, XRP, ADA, SUI, ENA, DOGE, BONK, FARTCOIN), regulatory terms (GENIUS, CLARITY, SEC, CFTC), institutional players (BlackRock, MicroStrategy, Tesla), and trading terms
+    - **81 Macro Keywords:** Comprehensive coverage of Fed policy (Powell, FOMC, rate hikes/cuts), economic indicators (CPI, employment, GDP), ETF developments, and institutional adoption
+  - **Real-Time Market Data Integration:** 
+    - Live price data from CoinGecko API for 10 tracked cryptocurrencies
+    - Trending token analysis (Top 15 trending coins + NFTs)
+    - Market cap rankings and price change analytics (1h, 24h, 7d, 30d)
+    - Intelligent caching and rate limiting for API efficiency
+  - **RSS Feed Aggregation** from major crypto news sources (CoinDesk, CoinTelegraph, Decrypt, etc.)
+  - **Macroeconomic and regulatory news** from **full political spectrum** for balanced analysis:
     - **Centrist/Unbiased:** MarketWatch (financial news leader)
     - **Conservative/Right-leaning:** National Review, Reason Magazine, AEI, Manhattan Institute, Mises Institute  
     - **Liberal/Left-leaning:** NPR (News, All Things Considered, Planet Money), Washington Post Business, Mother Jones
-  - **Balanced approach:** AI receives perspectives from all major political viewpoints to make truly informed decisions
-  - **AI-Powered Market Analysis:** OpenAI GPT-4o synthesizes all gathered headlines into actionable market insights
-    - Identifies key market themes and sentiment
-    - Highlights regulatory and macroeconomic factors
-    - Provides specific opportunities and risks for traders
-    - Professional-grade analysis comparable to financial research firms
-  - Intelligent keyword-based content filtering
+  - **Enhanced AI-Powered Market Analysis:** OpenAI GPT-4o synthesizes quantitative CoinGecko data with qualitative news intelligence:
+    - **Institutional-Grade Prompting:** Optimized based on OpenAI 2025 best practices with role definition, task specificity, and clear deliverables
+    - **Multi-Source Intelligence:** Combines live price data, trending analysis, crypto news, and macro context
+    - **Professional Output:** 4-5 sentence institutional morning briefing format with confidence levels and specific trading opportunities
+    - **Risk Assessment:** Macro/regulatory risk analysis with clear directional bias for portfolio positioning
+  - **Comprehensive Content Coverage:** Now captures ETF flows, Fed policy decisions, institutional adoption, regulatory developments, and market sentiment
   - Caching system to prevent duplicate processing
   - Robust error handling with graceful degradation
   - Daily research reports saved for audit trail
-- **Benefits:** AI now makes trading decisions with awareness of current market events, regulatory changes, and sentiment
+- **Benefits:** AI now makes trading decisions with comprehensive market awareness including quantitative data, institutional flows, regulatory changes, and balanced sentiment analysis
 
 ### Market Intelligence Pipeline
 - **Stable Data Sources:** Prioritizes RSS feeds over web scraping for reliability
@@ -260,16 +279,28 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 - **Error Resilience:** Individual source failures don't crash the entire research process
 - **Structured Output:** Generates clean, markdown-formatted reports for AI consumption
 
-### Advanced Prompt Engineering Architecture (August 2025)
-- **Problem Solved:** Monolithic prompt building was brittle and hard to maintain
-- **Solution:** Dedicated `PromptEngine` module with template-based architecture
-- **Key Features:**
-  - **Professional Template System:** XML-tagged prompt structure for clarity and consistency
-  - **Intelligent Truncation:** Smart research report truncation preserving header and recent content
+### Advanced Prompt Engineering Architecture (August 2025) - ENHANCED
+- **Problem Solved:** Monolithic prompt building was brittle and hard to maintain; AI lacked comprehensive market context
+- **Solution:** Dedicated `PromptEngine` module with template-based architecture and integrated CoinGecko data
+- **Enhanced Key Features (August 2025):**
+  - **Professional Template System:** XML-tagged prompt structure with dedicated sections for quantitative market data and qualitative news intelligence
+  - **Multi-Source Data Integration:** 
+    - Real-time CoinGecko price data, trending analysis, and market metrics
+    - Comprehensive news intelligence from crypto and macro sources
+    - Portfolio context and performance history
+    - Previous thesis and strategic context
+  - **OpenAI 2025 Best Practices Implementation:**
+    - **Role Definition:** "Senior cryptocurrency portfolio manager and quantitative analyst"
+    - **Task Specificity:** Focus on 10 tracked cryptocurrency positions with clear deliverables
+    - **Target Audience:** Institutional crypto traders and portfolio managers
+    - **Output Format:** 4-5 flowing sentences suitable for institutional morning briefings
+    - **Analysis Type:** Combined fundamental sentiment + technical price action + quantitative metrics
+  - **Intelligent Truncation:** Smart research report truncation preserving header and recent content while maintaining 3000-token limit
+  - **Enhanced Context Assembly:** CoinGecko market data formatted for AI consumption with price direction indicators and trending analysis
   - **Performance Feedback Loop:** Infrastructure for thesis accuracy tracking (V2 enhancement)
   - **Comprehensive Logging:** All prompts logged with timestamps for debugging and audit
   - **Future-Proofing:** Ready for OpenAI tool use and function calling integration
-- **Benefits:** Improved prompt reliability, better AI responses, easier maintenance and iteration
+- **Benefits:** Dramatically improved AI response quality with institutional-grade market intelligence, quantitative data integration, and professional prompt optimization
 
 ---
 
@@ -286,14 +317,15 @@ The trading bot has been upgraded from a monolithic pipeline to a sophisticated 
 - **Robust Error Handling**: Individual agent failures don't crash the entire system
 - **Context Preservation**: All agents operate with shared context to maintain coherent decision-making
 
-### Agent Specifications
+### Agent Specifications (Enhanced August 2025)
 
 | Agent | Role | Cognitive Function | Input | Output |
 |-------|------|-------------------|-------|--------|
+| **CoinGecko-AI** | Market Data Specialist | Real-time price data, trending analysis, market metrics | Token IDs, trending preferences | Live market data with quality assessment |
 | **Supervisor-AI** | Central Orchestrator | Pipeline management, final validation, trade approval | Initial cycle trigger | Complete execution results |
-| **Analyst-AI** | Market Intelligence | News aggregation, sentiment analysis, trend identification | Research directives | Structured intelligence report |
-| **Strategist-AI** | Prompt Engineering | Context assembly, prompt optimization, strategy formulation | Intelligence + portfolio data | Optimized AI prompt payload |
-| **Trader-AI** | AI Execution | OpenAI API calls, response parsing, quality assessment | Prompt payload | Validated trading plan |
+| **Analyst-AI** | Market Intelligence | News aggregation, sentiment analysis, CoinGecko data integration | Research directives + CoinGecko data | Enhanced intelligence report with quantitative context |
+| **Strategist-AI** | Prompt Engineering | Multi-source context assembly, OpenAI 2025 optimization | Intelligence + CoinGecko + portfolio data | Institutional-grade AI prompt payload |
+| **Trader-AI** | AI Execution | OpenAI API calls, response parsing, quality assessment | Enhanced prompt payload | Validated trading plan with confidence metrics |
 
 ### Communication Protocol
 
@@ -303,9 +335,18 @@ All inter-agent communication follows a standardized JSON format with complete a
 
 Each agent maintains complete cognitive transparency through timestamped transcript files in `logs/agent_transcripts/{YYYY-MM-DD}/`.
 
-### Pipeline State Management
+### Pipeline State Management (Enhanced August 2025)
 
-The Supervisor-AI manages pipeline execution through well-defined states: IDLE → RUNNING_ANALYST → RUNNING_STRATEGIST → RUNNING_TRADER → REVIEWING_PLAN → EXECUTING_TRADES → COMPLETED.
+The Supervisor-AI manages pipeline execution through well-defined states: IDLE → RUNNING_COINGECKO → RUNNING_ANALYST → RUNNING_STRATEGIST → RUNNING_TRADER → REVIEWING_PLAN → EXECUTING_TRADES → COMPLETED.
+
+**Enhanced Pipeline Flow:**
+1. **Stage 1:** CoinGecko-AI fetches real-time market data for 10 tracked cryptocurrencies
+2. **Stage 2:** Analyst-AI aggregates news intelligence and integrates with CoinGecko data  
+3. **Stage 3:** Strategist-AI builds institutional-grade prompts with multi-source intelligence
+4. **Stage 4:** Trader-AI executes enhanced prompts and parses trading decisions
+5. **Stage 5:** Supervisor-AI reviews and validates trading plans
+6. **Stage 6:** Trade execution (if approved)
+7. **Stage 7:** Performance tracking and cognitive logging
 
 ### Quality Assurance & Validation
 
@@ -328,12 +369,27 @@ python run_multiagent_demo.py
 python scheduler_multiagent.py demo
 ```
 
-### Migration from Legacy System
+### Migration from Legacy System (Updated August 2025)
 
-The new multi-agent system maintains backward compatibility while providing enhanced capabilities:
+The enhanced multi-agent system provides significant improvements over the legacy monolithic architecture:
+
+**Enhanced Capabilities:**
+- **Real-Time Market Intelligence:** CoinGecko API integration provides live price data and trending analysis
+- **Comprehensive News Coverage:** 57 crypto + 81 macro keywords capture institutional flows, ETF developments, Fed policy, and regulatory changes
+- **Institutional-Grade AI Analysis:** OpenAI 2025 best practices with professional prompt optimization and quantitative data integration
+- **Enhanced Cognitive Transparency:** Complete audit trails for all agent decisions and data flows
+- **Multi-Source Intelligence:** Combines quantitative CoinGecko data with qualitative news analysis
+- **Professional Output Quality:** Institutional morning briefing format with confidence levels and specific trading opportunities
+
+**Backward Compatibility:**
 - Legacy modules remain functional during transition
-- Enhanced cognitive transparency and audit trails
-- Improved error handling and resilience
-- Better AI decision quality through specialized agents
+- Existing logs and data structures preserved
+- Gradual migration path with parallel testing capabilities
+
+**Performance Improvements:**
+- Dramatically improved AI decision quality through specialized agents
+- Better market context awareness with real-time data integration
+- Enhanced risk assessment with macro/regulatory intelligence
+- More actionable trading insights with institutional-grade analysis
 
 ---
