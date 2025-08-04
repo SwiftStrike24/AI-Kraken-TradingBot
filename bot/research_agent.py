@@ -4,7 +4,7 @@ import json
 import logging
 import feedparser
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import requests
 from urllib.parse import urlparse
 from openai import OpenAI, APIError
@@ -87,20 +87,32 @@ class ResearchAgent:
             "https://www.motherjones.com/rss/"       # Progressive magazine - 10 entries
         ]
         
-        # Keywords for filtering relevant crypto content
+        # Keywords for filtering relevant crypto content (enhanced for August 2025)
         self.crypto_keywords = [
-            'bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'cryptocurrency',
-            'sec', 'regulation', 'etf', 'halving', 'defi', 'nft', 'web3',
-            'solana', 'cardano', 'binance', 'coinbase', 'kraken'
+            # Core cryptocurrencies
+            'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'ripple',
+            'cardano', 'ada', 'sui', 'ethena', 'ena', 'dogecoin', 'doge', 'bonk', 'fartcoin',
+            # General crypto terms
+            'crypto', 'cryptocurrency', 'digital asset', 'blockchain', 'defi', 'nft', 'web3',
+            # Regulatory and institutional
+            'sec', 'cftc', 'regulation', 'regulatory', 'genius', 'clarity', 'stablecoin',
+            'project crypto', 'america first', 'trump crypto',
+            # ETFs and institutional
+            'etf', 'btc etf', 'sol etf', 'xrp etf', 'crypto etf', 'spot etf',
+            'blackrock', 'fidelity', 'vanguard', 'grayscale', 'institutional',
+            # Exchanges and platforms
+            'binance', 'coinbase', 'kraken', 'custody', 'microstrategy', 'tesla',
+            # Market terms
+            'halving', 'mining', 'staking', 'yield', 'liquidity', 'adoption'
         ]
         
-        # Keywords for macro/regulatory content (expanded for better coverage)
+        # Keywords for macro/regulatory content (enhanced for August 2025)
         self.macro_keywords = [
             # Federal Reserve and monetary policy
             'fed', 'federal reserve', 'powell', 'fomc', 'monetary policy',
-            'interest rate', 'rate cut', 'rate hike', 'fed chair', 'central bank',
+            'interest rate', 'rate rates', 'rate cut', 'rate hike', 'fed chair', 'central bank',
             # Economic indicators
-            'inflation', 'cpi', 'ppi', 'pce', 'unemployment', 'jobs report',
+            'inflation', 'cpi', 'ppi', 'pce', 'unemployment', 'jobs report', 'employment',
             'gdp', 'economic growth', 'recession', 'economy', 'economic',
             # Market and financial terms
             'treasury', 'bond', 'yields', 'dollar', 'dxy', 'market', 'stocks',
@@ -109,7 +121,15 @@ class ResearchAgent:
             'congress', 'government', 'policy', 'tax', 'budget', 'debt',
             'stimulus', 'spending', 'fiscal', 'trump', 'biden',
             # Global and trade
-            'trade', 'tariff', 'china', 'europe', 'global', 'international'
+            'trade', 'tariff', 'china', 'europe', 'global', 'international',
+            # Crypto-specific regulatory terms (August 2025)
+            'crypto', 'bitcoin', 'ethereum', 'cryptocurrency', 'digital asset',
+            'sec', 'cftc', 'regulation', 'regulatory', 'genius', 'clarity',
+            'stablecoin', 'project crypto', 'america first', 'usa',
+            # ETF and institutional terms
+            'etf', 'btc etf', 'crypto etf', 'blackrock', 'fidelity', 'vanguard',
+            'grayscale', 'institutional', 'custody', 'coinbase', 'microstrategy',
+            'tesla', 'adoption', 'defi'
         ]
         
         # Load cache for preventing duplicate processing
@@ -369,10 +389,13 @@ class ResearchAgent:
             "macro/regulatory news"
         )
     
-    def _fetch_market_summary(self) -> str:
+    def _fetch_market_summary(self, coingecko_data: Dict[str, Any] = None) -> str:
         """
-        Generate AI-powered market analysis based on all gathered headlines.
-        Synthesizes crypto and macro news from across the political spectrum into actionable insights.
+        Generate AI-powered market analysis based on all gathered headlines and real-time market data.
+        Synthesizes crypto news, macro news, and quantitative market data into actionable insights.
+        
+        Args:
+            coingecko_data: Real-time market data from CoinGecko API (optional)
         """
         try:
             if not self.openai_client:
@@ -391,22 +414,43 @@ class ResearchAgent:
             crypto_text = "\n".join(crypto_headlines) if crypto_headlines else "No crypto news available."
             macro_text = "\n".join(macro_headlines) if macro_headlines else "No macro news available."
             
-            # Create comprehensive prompt for market analysis
-            analysis_prompt = f"""You are a professional financial market analyst. Analyze the following live news data from today and provide a concise, actionable market summary.
+            # Prepare CoinGecko market data for analysis
+            market_data_text = ""
+            if coingecko_data and coingecko_data.get('market_data'):
+                market_data_text = self._format_coingecko_for_ai(coingecko_data)
+            else:
+                market_data_text = "Real-time market data unavailable."
+            
+            # Create comprehensive prompt for market analysis (optimized based on OpenAI 2025 best practices)
+            analysis_prompt = f"""ROLE: You are a senior cryptocurrency portfolio manager and technical analyst at a quantitative hedge fund, specializing in both fundamental and technical analysis for institutional clients.
 
-CRYPTO NEWS ({len(crypto_headlines)} headlines):
+TASK: Synthesize the following multi-source intelligence into a concise, actionable market assessment focusing on the top 10 cryptocurrency positions (BTC, ETH, SOL, ADA, XRP, SUI, ENA, DOGE, FARTCOIN, BONK).
+
+DATA SOURCES:
+
+QUANTITATIVE MARKET DATA:
+{market_data_text}
+
+QUALITATIVE NEWS INTELLIGENCE ({len(crypto_headlines)} crypto headlines):
 {crypto_text}
 
-MACRO/REGULATORY NEWS ({len(macro_headlines)} headlines from across political spectrum):
+MACRO/REGULATORY CONTEXT ({len(macro_headlines)} headlines):
 {macro_text}
 
-Please provide a 3-4 sentence market analysis that:
-1. Identifies the most significant market themes and trends
-2. Highlights any regulatory or macroeconomic factors affecting crypto
-3. Assesses overall market sentiment (bullish/bearish/neutral)
-4. Mentions any specific opportunities or risks for traders
+OUTPUT REQUIREMENTS:
+• Target Audience: Institutional crypto traders and portfolio managers
+• Format: 4-5 flowing sentences without bullet points or sections
+• Update Frequency: Daily market open assessment
+• Analysis Type: Combined fundamental sentiment + technical price action + quantitative metrics
 
-Format as a clean, professional summary without bullet points or sections - just flowing analysis text."""
+SPECIFIC DELIVERABLES:
+1. Quantify overall market sentiment (bullish/bearish/neutral) with confidence level
+2. Identify 2-3 highest conviction trading opportunities from tracked assets
+3. Highlight critical price levels and technical patterns from real-time data
+4. Assess macro/regulatory risks that could impact portfolio positioning today
+5. Provide clear directional bias for risk management
+
+Deliver as professional, flowing analysis text suitable for institutional morning briefing."""
 
             logger.info("Generating AI-powered market analysis...")
             
@@ -416,7 +460,7 @@ Format as a clean, professional summary without bullet points or sections - just
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are a professional cryptocurrency and financial market analyst. Provide concise, actionable market insights based on current news."
+                        "content": "You are a senior cryptocurrency portfolio manager and quantitative analyst at a top-tier investment firm. Your expertise spans technical analysis, fundamental research, and institutional trading strategies. You synthesize real-time market data with news sentiment to deliver precise, actionable intelligence for professional traders and portfolio managers."
                     },
                     {
                         "role": "user", 
@@ -439,9 +483,72 @@ Format as a clean, professional summary without bullet points or sections - just
             logger.error(f"Error generating AI market summary: {e}")
             return "Market analysis based on live data feeds. AI analysis encountered an error."
     
-    def generate_daily_report(self) -> str:
+    def _format_coingecko_for_ai(self, coingecko_data: Dict[str, Any]) -> str:
+        """
+        Format CoinGecko data into clean text for AI consumption.
+        
+        Args:
+            coingecko_data: Raw CoinGecko data from the agent
+            
+        Returns:
+            Formatted string suitable for AI prompt injection
+        """
+        try:
+            text_parts = []
+            
+            # Format market data
+            market_data = coingecko_data.get('market_data', {})
+            if market_data:
+                text_parts.append("LIVE PRICE DATA:")
+                for token_id, data in market_data.items():
+                    if isinstance(data, dict):
+                        name = data.get('name', token_id.upper())
+                        symbol = data.get('symbol', '').upper()
+                        price = data.get('current_price', 'N/A')
+                        change_24h = data.get('price_change_percentage_24h', 'N/A')
+                        mcap_rank = data.get('market_cap_rank', 'N/A')
+                        
+                        # Format price change with direction indicator
+                        if isinstance(change_24h, (int, float)):
+                            change_str = f"{change_24h:+.2f}%" 
+                            direction = "📈" if change_24h > 0 else "📉" if change_24h < 0 else "➡️"
+                        else:
+                            change_str = "N/A"
+                            direction = "➡️"
+                            
+                        text_parts.append(f"• {name} ({symbol}): ${price:,.2f} {direction} {change_str} (Rank #{mcap_rank})")
+            
+            # Format trending data
+            trending_data = coingecko_data.get('trending_data', {})
+            if trending_data and trending_data.get('coins'):
+                text_parts.append("\nTREDING NOW:")
+                trending_coins = trending_data['coins'][:5]  # Top 5 trending
+                for i, coin in enumerate(trending_coins, 1):
+                    if isinstance(coin, dict):
+                        item = coin.get('item', {})
+                        name = item.get('name', 'Unknown')
+                        symbol = item.get('symbol', 'N/A')
+                        rank = item.get('market_cap_rank', 'N/A')
+                        text_parts.append(f"  {i}. {name} ({symbol}) - Rank #{rank}")
+            
+            # Add data quality assessment
+            quality = coingecko_data.get('data_quality', {})
+            if quality:
+                score = quality.get('quality_score', 'unknown').upper()
+                text_parts.append(f"\nDATA QUALITY: {score}")
+            
+            return "\n".join(text_parts) if text_parts else "Market data formatting error."
+            
+        except Exception as e:
+            logger.error(f"Error formatting CoinGecko data for AI: {e}")
+            return "Market data available but formatting error occurred."
+    
+    def generate_daily_report(self, coingecko_data: Dict[str, Any] = None) -> str:
         """
         Generate a comprehensive daily market research report.
+        
+        Args:
+            coingecko_data: Real-time market data from CoinGecko API (optional)
         
         Returns:
             Formatted markdown string containing the day's market intelligence
@@ -503,7 +610,7 @@ Format as a clean, professional summary without bullet points or sections - just
         try:
             # Add AI-generated market analysis
             logger.info("Generating AI market context analysis...")
-            market_summary = self._fetch_market_summary()
+            market_summary = self._fetch_market_summary(coingecko_data)
             
             report_sections.append("## 📊 Market Context")
             report_sections.append("**AI-Generated Market Analysis:**")

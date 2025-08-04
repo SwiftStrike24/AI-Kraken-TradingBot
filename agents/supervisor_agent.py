@@ -18,6 +18,7 @@ from datetime import datetime
 from enum import Enum
 
 from .base_agent import BaseAgent
+from .coingecko_agent import CoinGeckoAgent
 from .analyst_agent import AnalystAgent
 from .strategist_agent import StrategistAgent
 from .trader_agent import TraderAgent
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 class PipelineState(Enum):
     """Enumeration of possible pipeline states."""
     IDLE = "idle"
+    RUNNING_COINGECKO = "running_coingecko"
     RUNNING_ANALYST = "running_analyst"
     RUNNING_STRATEGIST = "running_strategist"
     RUNNING_TRADER = "running_trader"
@@ -81,6 +83,7 @@ class SupervisorAgent(BaseAgent):
         self.performance_tracker = PerformanceTracker(kraken_api, logs_dir)
         
         # Initialize agent team with unified session directory
+        self.coingecko = CoinGeckoAgent(logs_dir, session_dir)
         self.analyst = AnalystAgent(logs_dir, session_dir)
         self.strategist = StrategistAgent(kraken_api, logs_dir, session_dir)
         self.trader = TraderAgent(logs_dir, session_dir)
@@ -160,25 +163,29 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Complete pipeline execution results
         """
-        # Step 1: Market Intelligence Gathering
-        analyst_result = self._run_analyst_stage(inputs)
+        # Step 1: CoinGecko Market Data Gathering
+        coingecko_result = self._run_coingecko_stage(inputs)
         
-        # Step 2: Strategic Prompt Construction
-        strategist_result = self._run_strategist_stage(analyst_result, inputs)
+        # Step 2: Market Intelligence Gathering (with CoinGecko data)
+        analyst_result = self._run_analyst_stage(coingecko_result, inputs)
         
-        # Step 3: AI Trading Decision Generation
+        # Step 3: Strategic Prompt Construction (with CoinGecko data)
+        strategist_result = self._run_strategist_stage(analyst_result, coingecko_result, inputs)
+        
+        # Step 4: AI Trading Decision Generation
         trader_result = self._run_trader_stage(strategist_result, inputs)
         
-        # Step 4: Final Review and Decision
+        # Step 5: Final Review and Decision
         final_decision = self._review_trading_plan(trader_result)
         
-        # Step 5: Trade Execution (if approved)
+        # Step 6: Trade Execution (if approved)
         execution_result = self._execute_trades_if_approved(final_decision)
         
-        # Step 6: Performance Tracking
+        # Step 7: Performance Tracking
         tracking_result = self._update_performance_tracking(execution_result)
         
         return {
+            "coingecko_result": coingecko_result,
             "analyst_result": analyst_result,
             "strategist_result": strategist_result,
             "trader_result": trader_result,
@@ -188,25 +195,72 @@ class SupervisorAgent(BaseAgent):
             "pipeline_summary": self._generate_pipeline_summary()
         }
     
-    def _run_analyst_stage(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_coingecko_stage(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute the Analyst-AI stage of the pipeline.
+        Execute the CoinGecko-AI stage of the pipeline.
         
         Args:
             inputs: Initial pipeline inputs
             
         Returns:
+            CoinGecko execution results
+        """
+        self.logger.info("💰 Stage 1: Running CoinGecko Market Data Collection")
+        self.current_state = PipelineState.RUNNING_COINGECKO
+        
+        try:
+            # Prepare CoinGecko inputs
+            coingecko_inputs = {
+                "token_ids": inputs.get("token_ids", ['bitcoin', 'ethereum', 'solana', 'cardano', 'ripple', 'sui', 'ethena', 'dogecoin', 'fartcoin', 'bonk']),
+                "include_trending": inputs.get("include_trending", True),
+                "vs_currency": inputs.get("vs_currency", "usd"),
+                "supervisor_directives": inputs
+            }
+            
+            # Execute CoinGecko agent
+            coingecko_result = self.coingecko.run(coingecko_inputs)
+            
+            # Store result in execution context
+            self.execution_context["agent_outputs"]["coingecko"] = coingecko_result
+            
+            if coingecko_result.get("status") == "error":
+                self.execution_context["errors"].append(f"CoinGecko-AI failed: {coingecko_result.get('error_message')}")
+                raise Exception(f"Market data gathering failed: {coingecko_result.get('error_message')}")
+            
+            self.logger.info("✅ CoinGecko-AI completed successfully")
+            return coingecko_result
+            
+        except Exception as e:
+            self.logger.error(f"CoinGecko stage failed: {e}")
+            self.execution_context["errors"].append(f"CoinGecko stage failure: {str(e)}")
+            raise
+    
+    def _run_analyst_stage(self, coingecko_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the Analyst-AI stage of the pipeline.
+        
+        Args:
+            coingecko_result: Results from the CoinGecko-AI stage
+            inputs: Initial pipeline inputs
+            
+        Returns:
             Analyst execution results
         """
-        self.logger.info("📊 Stage 1: Running Market Intelligence Analysis")
+        self.logger.info("📊 Stage 2: Running Market Intelligence Analysis")
         self.current_state = PipelineState.RUNNING_ANALYST
         
         try:
-            # Prepare analyst inputs
+            # Prepare analyst inputs with CoinGecko data
             analyst_inputs = {
                 "research_focus": inputs.get("research_focus", "general_market_analysis"),
                 "priority_keywords": inputs.get("priority_keywords", []),
-                "supervisor_directives": inputs
+                "supervisor_directives": inputs,
+                "coingecko_data": coingecko_result,  # Pass the full CoinGecko data
+                "coingecko_execution_context": {
+                    "timestamp": coingecko_result.get("timestamp"),
+                    "quality": coingecko_result.get("data_quality", {}),
+                    "data_freshness": "live"
+                }
             }
             
             # Execute analyst
@@ -227,18 +281,19 @@ class SupervisorAgent(BaseAgent):
             self.execution_context["errors"].append(f"Analyst stage failure: {str(e)}")
             raise
     
-    def _run_strategist_stage(self, analyst_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_strategist_stage(self, analyst_result: Dict[str, Any], coingecko_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the Strategist-AI stage of the pipeline.
         
         Args:
             analyst_result: Results from the Analyst-AI
+            coingecko_result: Results from the CoinGecko-AI
             inputs: Original pipeline inputs
             
         Returns:
             Strategist execution results
         """
-        self.logger.info("🧠 Stage 2: Running Strategic Prompt Construction")
+        self.logger.info("🧠 Stage 3: Running Strategic Prompt Construction")
         self.current_state = PipelineState.RUNNING_STRATEGIST
         
         try:
@@ -246,10 +301,17 @@ class SupervisorAgent(BaseAgent):
             strategist_inputs = {
                 "research_report": analyst_result.get("research_report", {}),
                 "intelligence_quality": analyst_result.get("intelligence_quality", {}),
+                "coingecko_data": coingecko_result.get("market_data", {}),
+                "trending_data": coingecko_result.get("trending_data", {}),
+                "coingecko_quality": coingecko_result.get("data_quality", {}),
                 "supervisor_directives": inputs,
                 "analyst_execution_context": {
                     "timestamp": analyst_result.get("timestamp"),
                     "quality": analyst_result.get("intelligence_quality", {}).get("quality_score", "unknown")
+                },
+                "coingecko_execution_context": {
+                    "timestamp": coingecko_result.get("timestamp"),
+                    "quality": coingecko_result.get("data_quality", {}).get("quality_score", "unknown")
                 }
             }
             
@@ -282,7 +344,7 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Trader execution results
         """
-        self.logger.info("🤖 Stage 3: Running AI Trading Decision Generation")
+        self.logger.info("🤖 Stage 4: Running AI Trading Decision Generation")
         self.current_state = PipelineState.RUNNING_TRADER
         
         try:
@@ -326,7 +388,7 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Final decision with approval status
         """
-        self.logger.info("🔍 Stage 4: Reviewing Trading Plan")
+        self.logger.info("🔍 Stage 5: Reviewing Trading Plan")
         self.current_state = PipelineState.REVIEWING_PLAN
         
         trading_plan = trader_result.get("trading_plan", {})
@@ -454,7 +516,7 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Trade execution results
         """
-        self.logger.info("⚡ Stage 5: Trade Execution")
+        self.logger.info("⚡ Stage 6: Trade Execution")
         self.current_state = PipelineState.EXECUTING_TRADES
         
         approval_decision = final_decision.get("approval_decision", {})
@@ -513,7 +575,7 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Performance tracking results
         """
-        self.logger.info("📈 Stage 6: Performance Tracking")
+        self.logger.info("📈 Stage 7: Performance Tracking")
         
         try:
             # Log current equity
@@ -645,6 +707,6 @@ class SupervisorAgent(BaseAgent):
         return {
             "current_state": self.current_state.value,
             "execution_context": self.execution_context,
-            "agents_available": ["Analyst-AI", "Strategist-AI", "Trader-AI"],
+            "agents_available": ["CoinGecko-AI", "Analyst-AI", "Strategist-AI", "Trader-AI"],
             "pipeline_ready": True
         }

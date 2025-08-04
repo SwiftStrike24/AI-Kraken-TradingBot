@@ -9,6 +9,7 @@ Each agent has a specific cognitive role:
 - AnalystAgent: Gathers and processes market intelligence
 - StrategistAgent: Builds sophisticated prompts for the AI decision engine
 - TraderAgent: Executes AI calls and parses trading decisions
+- CoinGeckoAgent: Provides real-time cryptocurrency market data and trends
 
 All agents follow the same interface pattern:
 1. log_thoughts() - Records internal reasoning
@@ -21,5 +22,6 @@ from .supervisor_agent import SupervisorAgent
 from .analyst_agent import AnalystAgent
 from .strategist_agent import StrategistAgent
 from .trader_agent import TraderAgent
+from .coingecko_agent import CoinGeckoAgent
 
-__all__ = ['BaseAgent', 'SupervisorAgent', 'AnalystAgent', 'StrategistAgent', 'TraderAgent']
+__all__ = ['BaseAgent', 'SupervisorAgent', 'AnalystAgent', 'StrategistAgent', 'TraderAgent', 'CoinGeckoAgent']

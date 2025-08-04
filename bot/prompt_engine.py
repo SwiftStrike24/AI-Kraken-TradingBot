@@ -147,7 +147,7 @@ class PromptEngine:
         #    "Last thesis achieved +3.2% vs BTC. SOL position was profitable (+5.1%). 
         #     Strategy shows positive momentum over last 7 days."
     
-    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str) -> str:
+    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "") -> str:
         """
         Build the complete prompt by injecting context into the template.
         
@@ -155,6 +155,7 @@ class PromptEngine:
             portfolio_context: Current portfolio state and cash balance
             research_report: Market intelligence report from ResearchAgent
             last_thesis: Previous investment thesis
+            coingecko_data: Real-time market data from CoinGecko
             
         Returns:
             Complete prompt string ready for OpenAI API
@@ -174,6 +175,7 @@ class PromptEngine:
                 portfolio_context=portfolio_context,
                 research_report=truncated_research,
                 last_thesis=last_thesis,
+                coingecko_data=coingecko_data,
                 performance_review=performance_review
             )
             
@@ -216,7 +218,7 @@ class PromptEngine:
             logger.warning(f"Failed to log prompt: {e}")
     
     def build_openai_request(self, portfolio_context: str, research_report: str, 
-                           last_thesis: str, model: str = "gpt-4o") -> dict:
+                           last_thesis: str, coingecko_data: str = "", model: str = "gpt-4o") -> dict:
         """
         Build complete OpenAI API request object (future-proofing for tool use).
         
@@ -227,12 +229,13 @@ class PromptEngine:
             portfolio_context: Current portfolio state
             research_report: Market intelligence report  
             last_thesis: Previous investment thesis
+            coingecko_data: Real-time market data from CoinGecko
             model: OpenAI model to use
             
         Returns:
             Complete request object for OpenAI API
         """
-        prompt = self.build_prompt(portfolio_context, research_report, last_thesis)
+        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data)
         
         # V1: Basic implementation
         request = {

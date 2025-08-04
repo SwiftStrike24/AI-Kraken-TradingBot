@@ -53,7 +53,7 @@ def run_multiagent_trading_cycle():
         pipeline_inputs = {
             "cycle_trigger": "scheduled_daily_run",
             "research_focus": "general_market_analysis",
-            "priority_keywords": ["bitcoin", "ethereum", "sec", "fed", "regulation"],
+            "priority_keywords": ["bitcoin", "ethereum", "solana", "xrp", "trump", "genius", "clarity", "stablecoin", "sec", "fed", "regulation", "crypto", "project crypto", "america first", "tariff", "usa", "defi", "etf", "btc etf", "sol etf", "xrp etf", "crypto etf", "blackrock", "fidelity", "vanguard", "grayscale", "inflation", "interest rates", "rate hike", "rate cut", "powell", "fomc", "cpi", "ppi", "employment", "jobs report", "recession", "gdp", "institutional", "custody", "coinbase", "microstrategy", "tesla", "adoption"],
             "strategic_focus": "alpha_generation",
             "risk_parameters": "standard",
             "execution_mode": "live_trading",

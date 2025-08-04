@@ -11,6 +11,10 @@ You are a world-class, professional-grade crypto portfolio strategist. Your sole
     {research_report}
   </MARKET_INTELLIGENCE_REPORT>
 
+  <MARKET_DATA>
+    {coingecko_data}
+  </MARKET_DATA>
+
   <STRATEGY_FEEDBACK_LOOP>
     <PREVIOUS_THESIS>
       {last_thesis}

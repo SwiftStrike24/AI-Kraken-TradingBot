@@ -68,8 +68,10 @@ class StrategistAgent(BaseAgent):
         self.logger.info("Beginning strategic prompt construction...")
         
         try:
-            # Extract the market intelligence report
+            # Extract the market intelligence report and CoinGecko data
             research_report = inputs.get('research_report', {})
+            coingecko_data = inputs.get('coingecko_data', {})
+            trending_data = inputs.get('trending_data', {})
             supervisor_directives = inputs.get('supervisor_directives', {})
             
             # Gather portfolio context
@@ -84,6 +86,8 @@ class StrategistAgent(BaseAgent):
             # Construct the optimized prompt using the advanced prompt engine
             prompt_payload = self._construct_prompt_payload(
                 research_report, 
+                coingecko_data,
+                trending_data,
                 portfolio_context, 
                 performance_context, 
                 thesis_context,
@@ -292,7 +296,8 @@ class StrategistAgent(BaseAgent):
                 "thesis_age_days": 0
             }
     
-    def _construct_prompt_payload(self, research_report: Dict[str, Any], portfolio_context: Dict[str, Any], 
+    def _construct_prompt_payload(self, research_report: Dict[str, Any], coingecko_data: Dict[str, Any],
+                                trending_data: Dict[str, Any], portfolio_context: Dict[str, Any], 
                                 performance_context: Dict[str, Any], thesis_context: Dict[str, Any],
                                 supervisor_directives: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -300,6 +305,8 @@ class StrategistAgent(BaseAgent):
         
         Args:
             research_report: Market intelligence from Analyst-AI
+            coingecko_data: Market data from CoinGecko-AI
+            trending_data: Trending tokens data from CoinGecko-AI
             portfolio_context: Current portfolio state
             performance_context: Historical performance data
             thesis_context: Previous strategic thesis
@@ -315,11 +322,15 @@ class StrategistAgent(BaseAgent):
             # Convert portfolio context to text format
             portfolio_text = self._convert_portfolio_to_text(portfolio_context)
             
+            # Convert CoinGecko data to text format
+            coingecko_text = self._convert_coingecko_to_text(coingecko_data, trending_data)
+            
             # Build the prompt using the advanced prompt engine
             prompt_text = self.prompt_engine.build_prompt(
                 portfolio_context=portfolio_text,
                 research_report=research_text,
-                last_thesis=thesis_context.get('last_thesis', '')
+                last_thesis=thesis_context.get('last_thesis', ''),
+                coingecko_data=coingecko_text
             )
             
             return {
@@ -400,6 +411,82 @@ class StrategistAgent(BaseAgent):
             text_parts.append("No crypto assets held.")
         
         return "\n".join(text_parts)
+    
+    def _convert_coingecko_to_text(self, coingecko_data: Dict[str, Any], trending_data: Dict[str, Any]) -> str:
+        """
+        Convert CoinGecko market data to text format for prompt injection.
+        
+        Args:
+            coingecko_data: Market data from CoinGecko API
+            trending_data: Trending tokens data from CoinGecko API
+            
+        Returns:
+            Formatted text suitable for prompt injection
+        """
+        text_parts = []
+        
+        if coingecko_data:
+            text_parts.append("## Real-Time Market Data (CoinGecko)")
+            text_parts.append("")
+            
+            # Format major tokens data
+            for token_id, data in coingecko_data.items():
+                name = data.get('name', token_id)
+                symbol = data.get('symbol', '').upper()
+                price = data.get('current_price', 0)
+                market_cap_rank = data.get('market_cap_rank', 'N/A')
+                
+                # Price changes
+                change_1h = data.get('price_change_percentage_1h', 0) or 0
+                change_24h = data.get('price_change_percentage_24h', 0) or 0
+                change_7d = data.get('price_change_percentage_7d', 0) or 0
+                
+                # Format market cap and volume
+                market_cap = data.get('market_cap', 0)
+                volume_24h = data.get('total_volume', 0)
+                
+                text_parts.append(f"**{name} ({symbol})**")
+                text_parts.append(f"  Price: ${price:,.2f} | Rank: #{market_cap_rank}")
+                text_parts.append(f"  Changes: 1h {change_1h:+.1f}% | 24h {change_24h:+.1f}% | 7d {change_7d:+.1f}%")
+                if market_cap and volume_24h:
+                    text_parts.append(f"  Market Cap: ${market_cap:,.0f} | Volume 24h: ${volume_24h:,.0f}")
+                text_parts.append("")
+        
+        if trending_data and trending_data.get('coins'):
+            text_parts.append("## Trending Tokens")
+            text_parts.append("")
+            
+            trending_coins = trending_data.get('coins', [])[:5]  # Top 5 trending
+            for i, coin in enumerate(trending_coins, 1):
+                name = coin.get('name', 'Unknown')
+                symbol = coin.get('symbol', '').upper()
+                rank = coin.get('market_cap_rank', 'N/A')
+                price_btc = coin.get('price_btc', 0)
+                
+                text_parts.append(f"{i}. {name} ({symbol}) - Rank #{rank} | {price_btc:.8f} BTC")
+            
+            text_parts.append("")
+        
+        # Add market overview if we have multiple tokens
+        if len(coingecko_data) >= 2:
+            text_parts.append("## Market Overview")
+            text_parts.append("")
+            
+            # Calculate average 24h change for major tokens
+            changes_24h = [data.get('price_change_percentage_24h', 0) or 0 for data in coingecko_data.values()]
+            avg_change = sum(changes_24h) / len(changes_24h) if changes_24h else 0
+            
+            if avg_change > 2:
+                market_tone = "bullish"
+            elif avg_change < -2:
+                market_tone = "bearish"
+            else:
+                market_tone = "neutral"
+            
+            text_parts.append(f"Market tone: {market_tone} (avg 24h change: {avg_change:+.1f}%)")
+            text_parts.append("")
+        
+        return "\n".join(text_parts) if text_parts else "No real-time market data available."
     
     def _extract_research_summary(self, research_report: Dict[str, Any]) -> str:
         """Extract a concise summary of the research report."""

@@ -1,0 +1,415 @@
+{
+  "market_data_bitcoin,bonk,cardano,dogecoin,ethena,ethereum,fartcoin,ripple,solana,sui_usd": {
+    "timestamp": "2025-08-04T17:31:02.744937",
+    "data": {
+      "bitcoin": {
+        "name": "Bitcoin",
+        "symbol": "btc",
+        "current_price": 115296,
+        "market_cap": 2294423248947,
+        "market_cap_rank": 1,
+        "fully_diluted_valuation": 2294423248947,
+        "total_volume": 32165508814,
+        "circulating_supply": 19901987.0,
+        "total_supply": 19901987.0,
+        "max_supply": 21000000.0,
+        "price_change_percentage_1h": 0.09066222634870276,
+        "price_change_percentage_24h": 0.8274906397150639,
+        "price_change_percentage_7d": -2.2182410519439983,
+        "price_change_percentage_30d": 6.5510089937632605,
+        "last_updated": "2025-08-04T23:30:57.188Z"
+      },
+      "ethereum": {
+        "name": "Ethereum",
+        "symbol": "eth",
+        "current_price": 3723.34,
+        "market_cap": 449486592804,
+        "market_cap_rank": 2,
+        "fully_diluted_valuation": 449486592804,
+        "total_volume": 28230545210,
+        "circulating_supply": 120709612.1470168,
+        "total_supply": 120709612.1470168,
+        "max_supply": null,
+        "price_change_percentage_1h": -0.03853865864999868,
+        "price_change_percentage_24h": 5.996736669513589,
+        "price_change_percentage_7d": -1.6567695713065311,
+        "price_change_percentage_30d": 47.95471826222843,
+        "last_updated": "2025-08-04T23:30:58.312Z"
+      },
+      "ripple": {
+        "name": "XRP",
+        "symbol": "xrp",
+        "current_price": 3.08,
+        "market_cap": 182541080301,
+        "market_cap_rank": 3,
+        "fully_diluted_valuation": 307739459736,
+        "total_volume": 5380814983,
+        "circulating_supply": 59308385925.0,
+        "total_supply": 99985880506.0,
+        "max_supply": 100000000000.0,
+        "price_change_percentage_1h": 0.026649550147735145,
+        "price_change_percentage_24h": 4.2769318911327385,
+        "price_change_percentage_7d": -2.002635971368103,
+        "price_change_percentage_30d": 38.838375686355484,
+        "last_updated": "2025-08-04T23:30:51.460Z"
+      },
+      "solana": {
+        "name": "Solana",
+        "symbol": "sol",
+        "current_price": 169.38,
+        "market_cap": 91202984507,
+        "market_cap_rank": 6,
+        "fully_diluted_valuation": 102780142926,
+        "total_volume": 5070560742,
+        "circulating_supply": 538412908.2787786,
+        "total_supply": 606758132.537584,
+        "max_supply": null,
+        "price_change_percentage_1h": 0.33863101691861225,
+        "price_change_percentage_24h": 4.177311122741713,
+        "price_change_percentage_7d": -8.064903372815824,
+        "price_change_percentage_30d": 14.920949924841983,
+        "last_updated": "2025-08-04T23:30:52.605Z"
+      },
+      "dogecoin": {
+        "name": "Dogecoin",
+        "symbol": "doge",
+        "current_price": 0.210714,
+        "market_cap": 31672457008,
+        "market_cap_rank": 9,
+        "fully_diluted_valuation": 31677097437,
+        "total_volume": 1794710617,
+        "circulating_supply": 150362026383.7051,
+        "total_supply": 150384616383.7052,
+        "max_supply": null,
+        "price_change_percentage_1h": 0.5963159905826747,
+        "price_change_percentage_24h": 5.715373866632727,
+        "price_change_percentage_7d": -7.723738562368962,
+        "price_change_percentage_30d": 28.135509583730094,
+        "last_updated": "2025-08-04T23:30:58.293Z"
+      },
+      "cardano": {
+        "name": "Cardano",
+        "symbol": "ada",
+        "current_price": 0.756589,
+        "market_cap": 27375615315,
+        "market_cap_rank": 11,
+        "fully_diluted_valuation": 34049573150,
+        "total_volume": 1158927363,
+        "circulating_supply": 36179680837.02519,
+        "total_supply": 45000000000.0,
+        "max_supply": 45000000000.0,
+        "price_change_percentage_1h": 0.14795695179264143,
+        "price_change_percentage_24h": 3.9424248010530536,
+        "price_change_percentage_7d": -4.693308461651609,
+        "price_change_percentage_30d": 31.54031171951236,
+        "last_updated": "2025-08-04T23:30:57.528Z"
+      },
+      "sui": {
+        "name": "Sui",
+        "symbol": "sui",
+        "current_price": 3.6,
+        "market_cap": 12647829991,
+        "market_cap_rank": 16,
+        "fully_diluted_valuation": 36013957772,
+        "total_volume": 1424345185,
+        "circulating_supply": 3511924479.569998,
+        "total_supply": 10000000000.0,
+        "max_supply": 10000000000.0,
+        "price_change_percentage_1h": 0.13925747718254147,
+        "price_change_percentage_24h": 4.144530111312406,
+        "price_change_percentage_7d": -8.493369005286171,
+        "price_change_percentage_30d": 24.286727074657584,
+        "last_updated": "2025-08-04T23:30:53.528Z"
+      },
+      "ethena": {
+        "name": "Ethena",
+        "symbol": "ena",
+        "current_price": 0.607262,
+        "market_cap": 3864219514,
+        "market_cap_rank": 41,
+        "fully_diluted_valuation": 9121344317,
+        "total_volume": 1211137729,
+        "circulating_supply": 6354687500.0,
+        "total_supply": 15000000000.0,
+        "max_supply": null,
+        "price_change_percentage_1h": -0.03481902652746238,
+        "price_change_percentage_24h": 1.6288696807724556,
+        "price_change_percentage_7d": -5.31496260705182,
+        "price_change_percentage_30d": 136.81209237202984,
+        "last_updated": "2025-08-04T23:30:58.061Z"
+      },
+      "bonk": {
+        "name": "Bonk",
+        "symbol": "bonk",
+        "current_price": 2.671e-05,
+        "market_cap": 2067224249,
+        "market_cap_rank": 60,
+        "fully_diluted_valuation": 2349614458,
+        "total_volume": 399565814,
+        "circulating_supply": 77419592329436.58,
+        "total_supply": 87995384923077.84,
+        "max_supply": 87995384923077.84,
+        "price_change_percentage_1h": 0.44112810142137293,
+        "price_change_percentage_24h": 1.5564326109892774,
+        "price_change_percentage_7d": -16.680433062911007,
+        "price_change_percentage_30d": 44.24422243398603,
+        "last_updated": "2025-08-04T23:30:57.108Z"
+      },
+      "fartcoin": {
+        "name": "Fartcoin",
+        "symbol": "fartcoin",
+        "current_price": 1.035,
+        "market_cap": 1037048745,
+        "market_cap_rank": 107,
+        "fully_diluted_valuation": 1037048745,
+        "total_volume": 218554521,
+        "circulating_supply": 999983251.142387,
+        "total_supply": 999983251.142387,
+        "max_supply": 1000000000.0,
+        "price_change_percentage_1h": 1.3214107834845812,
+        "price_change_percentage_24h": 10.61999501897808,
+        "price_change_percentage_7d": -8.970461388593003,
+        "price_change_percentage_30d": -12.329315385096104,
+        "last_updated": "2025-08-04T23:30:58.220Z"
+      }
+    }
+  },
+  "trending_tokens": {
+    "timestamp": "2025-08-04T17:31:04.841868",
+    "data": {
+      "coins": [
+        {
+          "id": "the-open-network",
+          "name": "Toncoin",
+          "symbol": "TON",
+          "market_cap_rank": 26,
+          "thumb": "https://coin-images.coingecko.com/coins/images/17980/standard/photo_2024-09-10_17.09.00.jpeg?1725963446",
+          "price_btc": 2.9695561180530372e-05,
+          "score": 0
+        },
+        {
+          "id": "notcoin",
+          "name": "Notcoin",
+          "symbol": "NOT",
+          "market_cap_rank": 300,
+          "thumb": "https://coin-images.coingecko.com/coins/images/33453/standard/rFmThDiD_400x400.jpg?1701876350",
+          "price_btc": 1.8789776155563202e-08,
+          "score": 1
+        },
+        {
+          "id": "smardex",
+          "name": "SMARDEX",
+          "symbol": "SDEX",
+          "market_cap_rank": 849,
+          "thumb": "https://coin-images.coingecko.com/coins/images/29470/standard/SDEX_logo_transparent_outside_240x240.png?1696930070",
+          "price_btc": 3.9618344418075526e-08,
+          "score": 2
+        },
+        {
+          "id": "pump-fun",
+          "name": "Pump.fun",
+          "symbol": "PUMP",
+          "market_cap_rank": 104,
+          "thumb": "https://coin-images.coingecko.com/coins/images/67164/standard/pump.jpg?1751949376",
+          "price_btc": 2.689959419304663e-08,
+          "score": 3
+        },
+        {
+          "id": "ethereum",
+          "name": "Ethereum",
+          "symbol": "ETH",
+          "market_cap_rank": 2,
+          "thumb": "https://coin-images.coingecko.com/coins/images/279/standard/ethereum.png?1696501628",
+          "price_btc": 0.03232147058334133,
+          "score": 4
+        },
+        {
+          "id": "pudgy-penguins",
+          "name": "Pudgy Penguins",
+          "symbol": "PENGU",
+          "market_cap_rank": 55,
+          "thumb": "https://coin-images.coingecko.com/coins/images/52622/standard/PUDGY_PENGUINS_PENGU_PFP.png?1733809110",
+          "price_btc": 3.1596202511383114e-07,
+          "score": 5
+        },
+        {
+          "id": "mamo",
+          "name": "Mamo",
+          "symbol": "MAMO",
+          "market_cap_rank": 742,
+          "thumb": "https://coin-images.coingecko.com/coins/images/55958/standard/Mamo_Circle_200x200_TransBG.png?1748974093",
+          "price_btc": 1.3924324269572121e-06,
+          "score": 6
+        },
+        {
+          "id": "myx-finance",
+          "name": "MYX Finance",
+          "symbol": "MYX",
+          "market_cap_rank": 768,
+          "thumb": "https://coin-images.coingecko.com/coins/images/55506/standard/myx.jpg?1746434335",
+          "price_btc": 3.514079012584655e-06,
+          "score": 7
+        },
+        {
+          "id": "bitcoin",
+          "name": "Bitcoin",
+          "symbol": "BTC",
+          "market_cap_rank": 1,
+          "thumb": "https://coin-images.coingecko.com/coins/images/1/standard/bitcoin.png?1696501400",
+          "price_btc": 1.0,
+          "score": 8
+        },
+        {
+          "id": "fartcoin",
+          "name": "Fartcoin",
+          "symbol": "FARTCOIN",
+          "market_cap_rank": 107,
+          "thumb": "https://coin-images.coingecko.com/coins/images/50891/standard/fart.jpg?1729503972",
+          "price_btc": 8.941996650907124e-06,
+          "score": 9
+        },
+        {
+          "id": "hyperliquid",
+          "name": "Hyperliquid",
+          "symbol": "HYPE",
+          "market_cap_rank": 15,
+          "thumb": "https://coin-images.coingecko.com/coins/images/50882/standard/hyperliquid.jpg?1729431300",
+          "price_btc": 0.00033759892549585805,
+          "score": 10
+        },
+        {
+          "id": "troll-2",
+          "name": "TROLL",
+          "symbol": "TROLL",
+          "market_cap_rank": 529,
+          "thumb": "https://coin-images.coingecko.com/coins/images/55282/standard/trolllogo.png?1745215015",
+          "price_btc": 8.236163589801358e-07,
+          "score": 11
+        },
+        {
+          "id": "ethena",
+          "name": "Ethena",
+          "symbol": "ENA",
+          "market_cap_rank": 41,
+          "thumb": "https://coin-images.coingecko.com/coins/images/36530/standard/ethena.png?1711701436",
+          "price_btc": 5.2889254799415255e-06,
+          "score": 12
+        },
+        {
+          "id": "solana",
+          "name": "Solana",
+          "symbol": "SOL",
+          "market_cap_rank": 6,
+          "thumb": "https://coin-images.coingecko.com/coins/images/4128/standard/solana.png?1718769756",
+          "price_btc": 0.001468261008482217,
+          "score": 13
+        },
+        {
+          "id": "litecoin",
+          "name": "Litecoin",
+          "symbol": "LTC",
+          "market_cap_rank": 24,
+          "thumb": "https://coin-images.coingecko.com/coins/images/2/standard/litecoin.png?1696501400",
+          "price_btc": 0.0010457085373565807,
+          "score": 14
+        }
+      ],
+      "nfts": [
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "symbol": null,
+          "thumb": null,
+          "floor_price_in_native_currency": null,
+          "floor_price_24h_percentage_change": null
+        }
+      ],
+      "categories": [
+        {
+          "id": null,
+          "name": null,
+          "market_cap_1h_change": null,
+          "slug": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "market_cap_1h_change": null,
+          "slug": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "market_cap_1h_change": null,
+          "slug": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "market_cap_1h_change": null,
+          "slug": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "market_cap_1h_change": null,
+          "slug": null
+        },
+        {
+          "id": null,
+          "name": null,
+          "market_cap_1h_change": null,
+          "slug": null
+        }
+      ]
+    }
+  }
+}

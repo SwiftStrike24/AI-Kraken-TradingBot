@@ -34,13 +34,22 @@ Scheduler (daily)
 ```
 Scheduler (daily)
    └── Supervisor-AI (Central Orchestrator)
-       ├── Analyst-AI → Market Intelligence & Sentiment Analysis
+       ├── CoinGecko-AI → Real-Time Market Data & Price Intelligence
+       │   ├── Live Cryptocurrency Prices, Market Caps & Volume Data (10 tokens: BTC, ETH, SOL, ADA, XRP, SUI, ENA, DOGE, FARTCOIN, BONK)
+       │   ├── Trending Tokens Analysis (Top 15 trending coins)
+       │   ├── Price Change Analytics (1h, 24h, 7d, 30d)
+       │   └── Intelligent Caching & Rate Limiting
+       ├── Analyst-AI → Market Intelligence & Sentiment Analysis (Enhanced with CoinGecko Data)
        │   ├── RSS Feed Aggregation (Crypto + Macro News from Unbiased/Right-leaning Sources)
+       │   ├── Enhanced Keyword Filtering (57 crypto + 81 macro keywords including ETFs, institutions, Fed policy)
+       │   ├── Real-Time Price Data Integration (from CoinGecko-AI)
+       │   ├── AI-Powered Market Summary (GPT-4o with Quantitative + Qualitative Context)
        │   ├── Keyword Filtering & Content Processing  
        │   └── Structured Intelligence Reports
        ├── Strategist-AI → Advanced Prompt Engineering
        │   ├── Portfolio Context Assembly
        │   ├── Performance History Integration
+       │   ├── CoinGecko Market Data Integration
        │   └── Optimized AI Prompt Construction
        ├── Trader-AI → AI Execution & Decision Parsing
        │   ├── OpenAI API Calls (GPT-4o)

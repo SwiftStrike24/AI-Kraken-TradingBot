@@ -51,20 +51,21 @@ class AnalystAgent(BaseAgent):
         Execute market intelligence gathering and analysis.
         
         Args:
-            inputs: Control inputs from Supervisor (typically contains directives)
+            inputs: Control inputs from Supervisor (contains directives and CoinGecko data)
             
         Returns:
             Structured research report with market intelligence
         """
         self.logger.info("Beginning market intelligence gathering...")
         
-        # Extract any specific research directives
+        # Extract any specific research directives and CoinGecko data
         research_focus = inputs.get('research_focus', 'general_market_analysis')
         priority_keywords = inputs.get('priority_keywords', [])
+        coingecko_data = inputs.get('coingecko_data', None)
         
         try:
-            # Generate the comprehensive research report
-            raw_report = self.research_engine.generate_daily_report()
+            # Generate the comprehensive research report with CoinGecko data
+            raw_report = self.research_engine.generate_daily_report(coingecko_data)
             
             # Process and structure the report
             structured_report = self._structure_report(raw_report, research_focus, priority_keywords)

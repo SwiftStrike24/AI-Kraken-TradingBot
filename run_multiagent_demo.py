@@ -171,7 +171,7 @@ def demo_full_pipeline_execution(supervisor: Any) -> Dict[str, Any]:
     pipeline_inputs = {
         "cycle_trigger": "live_demo",
         "research_focus": "general_market_analysis",
-        "priority_keywords": ["bitcoin", "ethereum", "sec", "fed", "regulation", "crypto"],
+        "priority_keywords": ["bitcoin", "ethereum", "solana", "xrp", "trump", "genius", "clarity", "stablecoin", "sec", "fed", "regulation", "crypto", "project crypto", "america first", "tariff", "usa", "defi", "etf", "btc etf", "sol etf", "xrp etf", "crypto etf", "blackrock", "fidelity", "vanguard", "grayscale", "inflation", "interest rates", "rate hike", "rate cut", "powell", "fomc", "cpi", "ppi", "employment", "jobs report", "recession", "gdp", "institutional", "custody", "coinbase", "microstrategy", "tesla", "adoption"],
         "strategic_focus": "alpha_generation", 
         "risk_parameters": "conservative",  # Conservative for demo
         "execution_mode": "demo_mode",  # Demo mode - no real trades
@@ -228,6 +228,20 @@ def analyze_pipeline_results(pipeline_result: Dict[str, Any]):
     print(f"   ✅ Pipeline Success: {'YES' if pipeline_summary.get('pipeline_success') else 'NO'}")
     print(f"   ⚠️  Total Warnings: {pipeline_summary.get('total_warnings', 0)}")
     print(f"   ❌ Total Errors: {pipeline_summary.get('total_errors', 0)}")
+    
+    # Analyze CoinGecko-AI results
+    coingecko_result = pipeline_result.get("pipeline_result", {}).get("coingecko_result", {})
+    if coingecko_result.get("status") == "success":
+        print_subsection("CoinGecko-AI Results")
+        data_quality = coingecko_result.get("data_quality", {})
+        market_data = coingecko_result.get("market_data", {})
+        trending_data = coingecko_result.get("trending_data", {})
+        
+        print(f"   💰 Market Tokens: {data_quality.get('market_tokens_count', 0)}")
+        print(f"   📊 Data Quality: {data_quality.get('quality_score', 'unknown')}")
+        print(f"   📈 Trending Coins: {data_quality.get('trending_coins_count', 0)}")
+        print(f"   🔥 Trending NFTs: {data_quality.get('trending_nfts_count', 0)}")
+        print(f"   💲 Cache Hit Ratio: {coingecko_result.get('cache_stats', {}).get('cache_hit_ratio', 0)*100:.0f}%")
     
     # Analyze Analyst-AI results
     analyst_result = pipeline_result.get("pipeline_result", {}).get("analyst_result", {})
