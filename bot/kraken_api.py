@@ -183,6 +183,44 @@ class KrakenAPI:
             }
         return prices
 
+    def get_pair_details(self, pair: str) -> dict:
+        """
+        Get detailed information for a specific trading pair, including ordermin.
+        
+        Args:
+            pair: Trading pair name (e.g., 'XETHZUSD', 'XXBTZUSD')
+            
+        Returns:
+            Dictionary with pair details including ordermin, or empty dict if not found
+        """
+        return self.asset_pairs.get(pair, {})
+    
+    def get_all_usd_trading_rules(self) -> dict:
+        """
+        Get trading rules for all USD pairs including minimum order sizes.
+        
+        Returns:
+            Dictionary mapping pair names to their trading rules
+        """
+        usd_pairs = {}
+        for pair_name, pair_info in self.asset_pairs.items():
+            # Only include USD pairs from our asset mapping
+            if pair_name in self.asset_to_usd_pair_map.values():
+                base_asset = pair_info.get('base', '')
+                ordermin = float(pair_info.get('ordermin', 0))
+                
+                # Clean base asset name for display
+                clean_base = base_asset[1:] if base_asset.startswith(('X', 'Z')) and len(base_asset) > 1 else base_asset
+                
+                usd_pairs[pair_name] = {
+                    'base_asset': clean_base,
+                    'ordermin': ordermin,
+                    'pair_decimals': int(pair_info.get('pair_decimals', 8)),
+                    'lot_decimals': int(pair_info.get('lot_decimals', 8))
+                }
+        
+        return usd_pairs
+
     def place_order(self, pair, order_type, volume, ordertype='market', validate=False):
         """
         Submits a market buy or sell order.

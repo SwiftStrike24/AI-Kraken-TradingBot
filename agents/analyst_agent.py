@@ -70,6 +70,9 @@ class AnalystAgent(BaseAgent):
             # Process and structure the report
             structured_report = self._structure_report(raw_report, research_focus, priority_keywords)
             
+            # Calculate volatility and trend metrics from CoinGecko data
+            market_metrics = self._calculate_market_metrics(coingecko_data)
+            
             self.logger.info("Market intelligence gathering completed successfully")
             
             return {
@@ -80,6 +83,7 @@ class AnalystAgent(BaseAgent):
                 "raw_report": raw_report,
                 "research_focus": research_focus,
                 "priority_keywords": priority_keywords,
+                "market_metrics": market_metrics,
                 "intelligence_quality": self._assess_intelligence_quality(structured_report)
             }
             
@@ -89,6 +93,135 @@ class AnalystAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Unexpected error during market analysis: {e}")
             raise
+    
+    def _calculate_market_metrics(self, coingecko_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate volatility and trend metrics from CoinGecko data.
+        
+        Args:
+            coingecko_data: Real-time market data from CoinGecko-AI
+            
+        Returns:
+            Dictionary with calculated market metrics
+        """
+        try:
+            if not coingecko_data or 'market_data' not in coingecko_data:
+                return {"status": "no_data", "metrics": {}}
+            
+            market_data = coingecko_data['market_data']
+            metrics = {}
+            
+            # Parse market data for each token
+            for token_info in market_data:
+                if isinstance(token_info, str):
+                    # Parse token string format: "**Bitcoin (BTC)** Price: $114,887.00 | Rank: #1 Changes: 1h -0.0% | 24h +0.1% | 7d -2.6%"
+                    lines = token_info.split('\n')
+                    for line in lines:
+                        if 'Changes:' in line and '|' in line:
+                            # Extract token name
+                            if '**' in line:
+                                token_name = line.split('**')[1].split('**')[0].split('(')[1].replace(')', '')
+                            else:
+                                continue
+                            
+                            # Extract price changes
+                            changes_part = line.split('Changes:')[1].strip()
+                            change_parts = changes_part.split('|')
+                            
+                            try:
+                                # Parse percentage changes
+                                h1_change = self._parse_percentage(change_parts[0])
+                                h24_change = self._parse_percentage(change_parts[1])
+                                d7_change = self._parse_percentage(change_parts[2])
+                                
+                                # Calculate metrics
+                                volatility = abs(h24_change)  # Simple volatility measure
+                                momentum_score = self._calculate_momentum(h1_change, h24_change, d7_change)
+                                trend_direction = self._determine_trend(h1_change, h24_change, d7_change)
+                                
+                                metrics[token_name] = {
+                                    "1h_change": h1_change,
+                                    "24h_change": h24_change,
+                                    "7d_change": d7_change,
+                                    "volatility": volatility,
+                                    "momentum_score": momentum_score,
+                                    "trend_direction": trend_direction
+                                }
+                                
+                            except Exception as e:
+                                self.logger.warning(f"Error parsing metrics for {token_name}: {e}")
+                                continue
+            
+            # Calculate overall market metrics
+            if metrics:
+                overall_volatility = sum(m["volatility"] for m in metrics.values()) / len(metrics)
+                overall_momentum = sum(m["momentum_score"] for m in metrics.values()) / len(metrics)
+                
+                # Determine market regime
+                market_regime = self._determine_market_regime(overall_volatility, overall_momentum)
+                
+                return {
+                    "status": "success",
+                    "individual_metrics": metrics,
+                    "overall_volatility": overall_volatility,
+                    "overall_momentum": overall_momentum,
+                    "market_regime": market_regime,
+                    "recommended_strategies": self._recommend_strategies(market_regime, overall_volatility)
+                }
+            
+            return {"status": "insufficient_data", "metrics": {}}
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating market metrics: {e}")
+            return {"status": "error", "error": str(e)}
+    
+    def _parse_percentage(self, text: str) -> float:
+        """Parse percentage from text like '24h +0.1%' or '1h -0.0%'"""
+        # Extract the percentage part
+        percent_part = text.split()[-1].replace('%', '')
+        return float(percent_part)
+    
+    def _calculate_momentum(self, h1: float, h24: float, h7d: float) -> float:
+        """Calculate momentum score based on timeframe changes"""
+        # Weight recent changes more heavily
+        momentum = (h1 * 0.5) + (h24 * 0.3) + (h7d * 0.2)
+        return momentum
+    
+    def _determine_trend(self, h1: float, h24: float, h7d: float) -> str:
+        """Determine trend direction"""
+        avg_change = (h1 + h24 + h7d) / 3
+        if avg_change > 2:
+            return "strong_bullish"
+        elif avg_change > 0.5:
+            return "bullish"
+        elif avg_change > -0.5:
+            return "neutral"
+        elif avg_change > -2:
+            return "bearish"
+        else:
+            return "strong_bearish"
+    
+    def _determine_market_regime(self, volatility: float, momentum: float) -> str:
+        """Determine overall market regime"""
+        if volatility > 3 and abs(momentum) > 2:
+            return "high_volatility_trending"
+        elif volatility > 3:
+            return "high_volatility_ranging"
+        elif abs(momentum) > 1:
+            return "low_volatility_trending"
+        else:
+            return "low_volatility_ranging"
+    
+    def _recommend_strategies(self, regime: str, volatility: float) -> list:
+        """Recommend trading strategies based on market regime"""
+        if regime == "high_volatility_trending":
+            return ["MOMENTUM_TRADING", "BREAKOUT_TRADING"]
+        elif regime == "high_volatility_ranging":
+            return ["MEAN_REVERSION", "SCALPING"]
+        elif regime == "low_volatility_trending":
+            return ["TREND_FOLLOWING", "ALTCOIN_ROTATION"]
+        else:
+            return ["DEFENSIVE_HOLDING", "ACCUMULATION"]
     
     def _structure_report(self, raw_report: str, focus: str, keywords: list) -> Dict[str, Any]:
         """

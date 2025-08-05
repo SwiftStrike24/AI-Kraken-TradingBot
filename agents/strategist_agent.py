@@ -83,6 +83,9 @@ class StrategistAgent(BaseAgent):
             # Gather thesis history
             thesis_context = self._gather_thesis_context()
             
+            # Gather trading rules from Kraken
+            trading_rules = self._gather_trading_rules()
+            
             # Construct the optimized prompt using the advanced prompt engine
             prompt_payload = self._construct_prompt_payload(
                 research_report, 
@@ -91,6 +94,7 @@ class StrategistAgent(BaseAgent):
                 portfolio_context, 
                 performance_context, 
                 thesis_context,
+                trading_rules,
                 supervisor_directives
             )
             
@@ -202,9 +206,9 @@ class StrategistAgent(BaseAgent):
                     "trend": "unknown"
                 }
             
-            # Read the equity log
+            # Read the equity log (CSV has no headers: timestamp, total_equity_usd)
             import pandas as pd
-            equity_df = pd.read_csv(self.equity_log_path)
+            equity_df = pd.read_csv(self.equity_log_path, names=['timestamp', 'total_equity_usd'])
             
             if len(equity_df) < 2:
                 return {
@@ -296,10 +300,53 @@ class StrategistAgent(BaseAgent):
                 "thesis_age_days": 0
             }
     
+    def _gather_trading_rules(self) -> str:
+        """
+        Gather trading rules and constraints from Kraken, format for AI consumption.
+        
+        Returns:
+            Formatted trading rules string for prompt injection.
+        """
+        try:
+            # Get all USD trading pairs with their minimum order sizes
+            usd_pairs = self.kraken_api.get_all_usd_trading_rules()
+            
+            if not usd_pairs:
+                return "⚠️ WARNING: No USD trading pairs available from Kraken API."
+            
+            # Format the trading rules for AI consumption
+            rules_text = "VALID KRAKEN USD TRADING PAIRS & MINIMUM ORDER SIZES:\n\n"
+            
+            # Sort pairs by base asset for better readability
+            sorted_pairs = sorted(usd_pairs.items(), key=lambda x: x[1]['base_asset'])
+            
+            for pair_name, pair_info in sorted_pairs:
+                base_asset = pair_info['base_asset']
+                ordermin = pair_info['ordermin']
+                
+                rules_text += f"✅ {pair_name} ({base_asset}/USD)\n"
+                rules_text += f"   - Minimum order size: {ordermin:.8f} {base_asset}\n"
+                rules_text += f"   - Use exact pair name: '{pair_name}'\n\n"
+            
+            rules_text += "\n🚨 CRITICAL TRADING REQUIREMENTS:\n"
+            rules_text += "1. Use ONLY the exact pair names listed above (e.g., 'XETHZUSD', not 'ETHUSD')\n"
+            rules_text += "2. Ensure your trade volume meets the minimum order size for each pair\n"
+            rules_text += "3. Calculate trade volume: (allocation_percentage × portfolio_value) ÷ asset_price\n"
+            rules_text += "4. If calculated volume < ordermin, either increase allocation or skip the trade\n\n"
+            
+            rules_text += f"📊 Total tradeable pairs: {len(usd_pairs)}\n"
+            rules_text += f"🔄 Rules updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            
+            return rules_text
+            
+        except Exception as e:
+            self.logger.error(f"Failed to gather trading rules: {e}")
+            return f"❌ ERROR: Could not fetch trading rules from Kraken API: {str(e)}"
+    
     def _construct_prompt_payload(self, research_report: Dict[str, Any], coingecko_data: Dict[str, Any],
                                 trending_data: Dict[str, Any], portfolio_context: Dict[str, Any], 
                                 performance_context: Dict[str, Any], thesis_context: Dict[str, Any],
-                                supervisor_directives: Dict[str, Any]) -> Dict[str, Any]:
+                                trading_rules: Dict[str, Any], supervisor_directives: Dict[str, Any]) -> Dict[str, Any]:
         """
         Construct the final prompt payload using the advanced prompt engine.
         
@@ -310,6 +357,7 @@ class StrategistAgent(BaseAgent):
             portfolio_context: Current portfolio state
             performance_context: Historical performance data
             thesis_context: Previous strategic thesis
+            trading_rules: Trading rules and constraints from Kraken
             supervisor_directives: Any special directives from the Supervisor-AI
             
         Returns:
@@ -330,7 +378,8 @@ class StrategistAgent(BaseAgent):
                 portfolio_context=portfolio_text,
                 research_report=research_text,
                 last_thesis=thesis_context.get('last_thesis', ''),
-                coingecko_data=coingecko_text
+                coingecko_data=coingecko_text,
+                trading_rules=trading_rules # Pass formatted trading rules to the prompt engine
             )
             
             return {

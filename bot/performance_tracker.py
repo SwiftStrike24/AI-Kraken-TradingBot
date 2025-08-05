@@ -151,3 +151,38 @@ class PerformanceTracker:
             logger.info(f"Successfully logged new thesis to {self.thesis_log_path}")
         except IOError as e:
             logger.error(f"Failed to write to thesis log file: {e}")
+
+    def log_rejected_trade(self, trade: dict, reason: str):
+        """
+        Logs a rejected trade to rejected_trades.csv for auditing purposes.
+
+        Args:
+            trade: The trade dictionary that was rejected
+            reason: The reason why the trade was rejected
+        """
+        try:
+            rejected_log_path = os.path.join(os.path.dirname(self.trades_log_path), "rejected_trades.csv")
+            
+            log_entry = {
+                'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
+                'requested_pair': trade.get('pair', 'N/A'),
+                'action': trade.get('action', 'N/A'),
+                'allocation_percentage': trade.get('allocation_percentage', trade.get('volume', 'N/A')),
+                'confidence_score': trade.get('confidence_score', 'N/A'),
+                'reasoning': trade.get('reasoning', 'N/A'),
+                'rejection_reason': reason
+            }
+            
+            df = pd.DataFrame([log_entry])
+            
+            # Append to CSV, creating the file with a header if it doesn't exist
+            df.to_csv(
+                rejected_log_path, 
+                mode='a', 
+                header=not os.path.exists(rejected_log_path), 
+                index=False
+            )
+            logger.info(f"Successfully logged rejected trade: {log_entry['requested_pair']} - {reason}")
+
+        except Exception as e:
+            logger.error(f"Could not log rejected trade: {e}")

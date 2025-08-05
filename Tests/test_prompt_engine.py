@@ -54,7 +54,7 @@ Generate a JSON response with trades and thesis.
         engine = PromptEngine(template_path=self.test_template_path)
         self.assertIsInstance(engine, PromptEngine)
         self.assertEqual(engine.template_path, self.test_template_path)
-        self.assertEqual(engine.max_tokens, 3000)  # Default value
+        self.assertIsNone(engine.max_tokens)  # Default is no limit
         self.assertIsNotNone(engine._template)
     
     def test_initialization_custom_max_tokens(self):

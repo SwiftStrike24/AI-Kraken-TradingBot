@@ -450,7 +450,42 @@ class SupervisorAgent(BaseAgent):
         if len(trades) > 5:
             validation_warnings.append(f"Unusually high number of trades: {len(trades)}")
         
-        # Check 5: Thesis quality
+        # Check 5: Confidence-based validation for new percentage trades
+        for i, trade in enumerate(trades):
+            if 'confidence_score' in trade:
+                confidence = trade.get('confidence_score', 0)
+                allocation = trade.get('allocation_percentage', 0)
+                
+                # Validate confidence score range
+                if not (0.1 <= confidence <= 1.0):
+                    validation_issues.append(f"Trade {i+1}: Invalid confidence score {confidence} (must be 0.1-1.0)")
+                
+                # Portfolio-size-aware allocation validation (matching Trader-AI logic)
+                try:
+                    # Get current portfolio value for validation
+                    portfolio_value = self._get_portfolio_value()
+                    max_allocation = 0.95 if portfolio_value < 50 else 0.4
+                    
+                    if not (0.01 <= allocation <= max_allocation):
+                        if portfolio_value < 50:
+                            validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-95% for small portfolios <$50)")
+                        else:
+                            validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-40% for portfolios >$50)")
+                except Exception as e:
+                    # Fallback to 40% limit if portfolio value can't be determined
+                    self.logger.warning(f"Could not determine portfolio value for validation: {e}")
+                    if not (0.01 <= allocation <= 0.4):
+                        validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-40%)")
+                
+                # Check confidence-allocation alignment
+                if confidence < 0.5 and allocation > 0.2:
+                    validation_warnings.append(f"Trade {i+1}: High allocation ({allocation*100:.1f}%) with low confidence ({confidence:.2f})")
+                
+                # Check for very low confidence trades
+                if confidence < 0.3:
+                    validation_warnings.append(f"Trade {i+1}: Very low confidence score ({confidence:.2f})")
+        
+        # Check 6: Thesis quality
         thesis_quality = quality_metrics.get("thesis_quality", "unknown")
         if thesis_quality == "brief":
             validation_warnings.append("Brief thesis may indicate insufficient reasoning")
@@ -466,6 +501,45 @@ class SupervisorAgent(BaseAgent):
             "trade_count": len(trades),
             "thesis_quality": thesis_quality
         }
+    
+    def _get_portfolio_value(self) -> float:
+        """
+        Get the current portfolio value in USD for validation purposes.
+        
+        Returns:
+            Total portfolio value in USD
+        """
+        try:
+            balance = self.kraken_api.get_account_balance()
+            total_value = 0.0
+            
+            # Add cash balances
+            cash_assets = {'USD', 'USDC', 'USDT'}
+            for cash_asset in cash_assets:
+                total_value += balance.get(cash_asset, 0.0)
+            
+            # Add crypto asset values
+            forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
+            crypto_assets = [asset for asset in balance.keys() 
+                           if asset not in cash_assets and asset not in forex_assets and balance[asset] > 0]
+            
+            if crypto_assets:
+                valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
+                if valid_pairs:
+                    prices = self.kraken_api.get_ticker_prices(valid_pairs)
+                    for asset in crypto_assets:
+                        amount = balance.get(asset, 0.0)
+                        if amount > 0:
+                            asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
+                            if asset_pair and asset_pair in prices:
+                                price = prices[asset_pair]['price']
+                                total_value += amount * price
+            
+            return total_value
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating portfolio value: {e}")
+            return 50.0  # Default to larger portfolio to keep 40% limit as fallback
     
     def _make_approval_decision(self, validation_result: Dict[str, Any], trading_plan: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -539,10 +613,15 @@ class SupervisorAgent(BaseAgent):
             # Execute trades using the existing trade executor
             trade_results = self.trade_executor.execute_trades(trading_plan)
             
-            # Log successful trades
+            # Log successful trades and rejected trades
             for result in trade_results:
                 if result.get("status") == "success":
                     self.performance_tracker.log_trade(result)
+                elif result.get("status") == "volume_too_small":
+                    # Log rejected trade for auditing
+                    original_trade = result.get("trade", {})
+                    rejection_reason = result.get("error", "Volume below minimum order size")
+                    self.performance_tracker.log_rejected_trade(original_trade, rejection_reason)
             
             execution_summary = {
                 "executed": True,

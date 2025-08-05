@@ -17,13 +17,13 @@ class PromptEngine:
     intelligent truncation, and future-proofing for advanced features.
     """
     
-    def __init__(self, template_path: str = "bot/prompt_template.md", max_tokens: int = 3000):
+    def __init__(self, template_path: str = "bot/prompt_template.md", max_tokens: int = None):
         """
         Initialize the PromptEngine.
         
         Args:
             template_path: Path to the prompt template file
-            max_tokens: Maximum tokens to allow for research report (for truncation)
+            max_tokens: Maximum tokens to allow for research report (None = no limit)
         """
         self.template_path = template_path
         self.max_tokens = max_tokens
@@ -81,6 +81,10 @@ class PromptEngine:
             return text
             
         estimated_tokens = self._estimate_tokens(text)
+        
+        # If no limit set, return full text
+        if self.max_tokens is None:
+            return text
         
         if estimated_tokens <= self.max_tokens:
             return text
@@ -147,7 +151,7 @@ class PromptEngine:
         #    "Last thesis achieved +3.2% vs BTC. SOL position was profitable (+5.1%). 
         #     Strategy shows positive momentum over last 7 days."
     
-    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "") -> str:
+    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "", trading_rules: str = "") -> str:
         """
         Build the complete prompt by injecting context into the template.
         
@@ -156,6 +160,7 @@ class PromptEngine:
             research_report: Market intelligence report from ResearchAgent
             last_thesis: Previous investment thesis
             coingecko_data: Real-time market data from CoinGecko
+            trading_rules: Valid Kraken trading pairs and minimum order sizes
             
         Returns:
             Complete prompt string ready for OpenAI API
@@ -176,6 +181,7 @@ class PromptEngine:
                 research_report=truncated_research,
                 last_thesis=last_thesis,
                 coingecko_data=coingecko_data,
+                trading_rules=trading_rules,
                 performance_review=performance_review
             )
             
@@ -207,7 +213,7 @@ class PromptEngine:
                 f.write(f"=== PROMPT LOG ===\n")
                 f.write(f"Timestamp: {datetime.utcnow().isoformat()}\n")
                 f.write(f"Template: {self.template_path}\n")
-                f.write(f"Max Tokens: {self.max_tokens}\n")
+                f.write(f"Max Tokens: {self.max_tokens or 'No Limit'}\n")
                 f.write(f"Estimated Tokens: {self._estimate_tokens(prompt)}\n")
                 f.write(f"==================\n\n")
                 f.write(prompt)
@@ -218,7 +224,7 @@ class PromptEngine:
             logger.warning(f"Failed to log prompt: {e}")
     
     def build_openai_request(self, portfolio_context: str, research_report: str, 
-                           last_thesis: str, coingecko_data: str = "", model: str = "gpt-4o") -> dict:
+                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o") -> dict:
         """
         Build complete OpenAI API request object (future-proofing for tool use).
         
@@ -230,12 +236,13 @@ class PromptEngine:
             research_report: Market intelligence report  
             last_thesis: Previous investment thesis
             coingecko_data: Real-time market data from CoinGecko
+            trading_rules: Valid Kraken trading pairs and minimum order sizes
             model: OpenAI model to use
             
         Returns:
             Complete request object for OpenAI API
         """
-        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data)
+        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data, trading_rules)
         
         # V1: Basic implementation
         request = {

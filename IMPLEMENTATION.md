@@ -223,6 +223,111 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 - **Impact:** Trading plans with no trades (hold strategies) now correctly pass validation
 - **Status:** ✅ PRODUCTION READY - All pipeline stages working correctly
 
+### Critical Bug Fix: CSV Parsing Error in Performance Feedback (August 4, 2025) - RESOLVED ✅
+- **Problem Solved:** Strategist-AI was failing to read performance history due to `KeyError: 'total_equity_usd'`
+- **Root Cause:** `equity.csv` file saved without headers, but code assumed headers existed when using `pd.read_csv()`
+- **Solution:** Added `names=['timestamp', 'total_equity_usd']` parameter to explicitly define column names
+- **Files Fixed:** 
+  - `agents/strategist_agent.py` - Performance context gathering method
+  - `scheduler_multiagent.py` - Interactive equity status check ([L] command)
+- **Impact:** AI now receives complete performance history for informed decision-making
+- **Status:** ✅ PRODUCTION READY - Performance feedback loop fully operational
+
+### Small Portfolio Trading Logic Enhancement (August 4, 2025) - IMPLEMENTED ✅
+- **Problem Solved:** AI was overly conservative with small portfolios, refusing to trade with $10.74 balance
+- **Root Cause:** AI considered small positions "insignificant" and worried about minimum order sizes
+- **Solution:** Added "SMALL PORTFOLIO MANDATE" to prompt template - prioritize ANY crypto position over 100% cash for portfolios under $50
+- **File Modified:** `bot/prompt_template.md` - Added constraint #4 for small portfolio guidance
+- **Impact:** AI now understands that small positions can generate meaningful alpha vs. holding cash
+- **Status:** ✅ PRODUCTION READY - AI will now trade with small capital amounts
+
+### Market Intelligence Token Limit Removal (August 4, 2025) - IMPLEMENTED ✅
+- **Problem Solved:** Strategist-AI was truncating research reports at 3000 tokens, limiting market context
+- **Root Cause:** Hardcoded `max_tokens=3000` in `PromptEngine` constructor was cutting off valuable intelligence
+- **Solution:** Removed token limit entirely - changed default from 3000 to `None` (no limit)
+- **Files Modified:** 
+  - `bot/prompt_engine.py` - Removed 3000-token constraint, added None check
+  - `Tests/test_prompt_engine.py` - Updated test expectations for no-limit default
+- **Impact:** AI now receives complete market intelligence without artificial truncation
+- **Status:** ✅ PRODUCTION READY - Full context passing to trading decisions
+
+### Multi-Strategy & Risk Allocation Framework (August 4, 2025) - IMPLEMENTED ✅
+- **Problem Solved:** AI made basic decisions with insufficient risk management and strategy selection
+- **Root Cause:** Single-strategy approach with fixed position sizing led to "insufficient funds" errors and suboptimal allocation
+- **Solution:** Comprehensive upgrade to percentage-based allocation with multi-strategy framework
+- **Files Modified:**
+  - `bot/prompt_template.md` - Added TRADING_STRATEGIES and RISK_ALLOCATION_ENGINE sections
+  - `bot/trade_executor.py` - Implemented percentage-to-volume conversion with portfolio value calculation
+  - `agents/supervisor_agent.py` - Added confidence-based validation and allocation limits
+  - `agents/analyst_agent.py` - Added volatility metrics and market regime detection
+- **Key Features:**
+  - **Percentage-Based Allocation:** Trades specified as % of portfolio (e.g., 25%) instead of fixed volume
+  - **Multi-Strategy Selection:** MOMENTUM_TRADING, MEAN_REVERSION, ALTCOIN_ROTATION, DEFENSIVE_HOLDING
+  - **Confidence-Based Sizing:** High confidence = larger allocation, low confidence = smaller allocation
+  - **Dynamic Risk Management:** Supervisor validates confidence-allocation alignment
+  - **Market Regime Detection:** AI receives volatility metrics and strategy recommendations
+- **Impact:** Eliminates "insufficient funds" errors, enables intelligent risk scaling, provides strategic flexibility
+- **Status:** ✅ PRODUCTION READY - Advanced multi-strategy trading with professional risk management
+
+### Format Validation Bug Fix (August 4, 2025) - RESOLVED ✅
+- **Problem Solved:** Trader-AI validation error "missing required field 'volume'" when using new percentage format
+- **Root Cause:** `_validate_single_trade` method still expected legacy volume format instead of new allocation_percentage format
+- **Solution:** Updated validation logic to handle both percentage-based and legacy volume-based trade formats
+- **File Modified:** `agents/trader_agent.py` - Enhanced validation to support dual format compatibility
+- **Impact:** AI can now properly validate percentage-based trades with confidence scores and reasoning
+- **Status:** ✅ PRODUCTION READY - Full percentage-based trading validation working
+
+### Kraken Pair Mapping Bug Fix (August 4, 2025) - RESOLVED ✅
+- **Problem Solved:** "Cannot get price for pair: ETHUSD" error - AI was using simplified pair names but Kraken uses complex naming
+- **Root Cause:** `_normalize_pair` method couldn't map "ETHUSD" to actual Kraken pair name "XETHZUSD"
+- **Solution:** Enhanced pair normalization to use Kraken's `asset_to_usd_pair_map` for accurate mapping
+- **File Modified:** `bot/trade_executor.py` - Completely rewritten `_normalize_pair` method with intelligent mapping
+- **Enhanced Features:**
+  - Direct asset-to-pair mapping lookup using Kraken's internal mapping
+  - Fallback logic for common prefixes (X, Z)
+  - Detailed error logging with similar pair suggestions
+  - Better variable naming and error handling
+- **Impact:** AI can now successfully convert percentage allocations to actual trades with correct Kraken pair names
+- **Status:** ✅ PRODUCTION READY - Robust pair name resolution for all supported assets
+
+### Trading Pair and Volume Validation Fixes (August 4, 2025) - IMPLEMENTED ✅
+- **Problem Solved:** AI was suggesting invalid Kraken pair names (e.g., 'ETHUSD' instead of 'XETHZUSD') and trades below minimum order sizes
+- **Root Cause:** AI lacked knowledge of exact Kraken pair names and minimum order volumes, causing API validation failures
+- **Solution:** Comprehensive multi-layer approach with AI guidance and hard guardrails
+- **Files Enhanced:**
+  - **KrakenAPI:** Added `get_pair_details()` and `get_all_usd_trading_rules()` methods to expose ordermin data
+  - **Prompt Template:** Added `<TRADING_RULES>` section with valid Kraken pairs and minimum order sizes
+  - **Strategist-AI:** Added `_gather_trading_rules()` method to format trading constraints for AI consumption
+  - **PromptEngine:** Updated `build_prompt()` to inject trading rules into AI context
+  - **TradeExecutor:** Added pre-validation minimum volume checks to prevent API errors
+  - **PerformanceTracker:** Added `log_rejected_trade()` method for audit transparency
+  - **Supervisor-AI:** Integrated rejected trade logging for complete audit trail
+- **Key Improvements:**
+  - **AI Guidance:** AI now receives exact Kraken pair names (e.g., 'XETHZUSD', 'XXBTZUSD') and minimum order sizes
+  - **Pre-flight Validation:** Volume checks before API calls prevent "volume minimum not met" errors
+  - **Graceful Degradation:** Individual trade failures don't abort entire trading cycle
+  - **Audit Transparency:** All rejected trades logged to `logs/rejected_trades.csv` with reasoning
+  - **Robust Error Handling:** System continues with valid trades when some fail validation
+- **Impact:** Eliminates trading cycle crashes, ensures only valid trades reach Kraken API, improves AI decision quality
+- **Status:** ✅ PRODUCTION READY - Comprehensive trading validation and error prevention
+
+### Allocation Percentage Validation Fix (August 4, 2025) - IMPLEMENTED ✅
+- **Problem Solved:** Error "Trade 0: invalid allocation_percentage format '0.95'" when AI returned 95% allocation for small portfolios
+- **Root Cause:** Trader-AI validation logic limited all portfolios to 40% max allocation, conflicting with small portfolio mandate to avoid holding excessive cash
+- **Solution:** Portfolio-size-aware validation with flexible allocation limits
+- **Files Modified:**
+  - **Trader-AI:** Updated `_validate_trade_format()` to allow up to 95% allocation for portfolios <$50
+  - **Supervisor-AI:** Updated `_validate_trading_plan()` and added `_get_portfolio_value()` for consistent validation
+  - **Prompt Template:** Clarified position sizing rules with separate limits for small vs large portfolios
+- **Key Changes:**
+  - **Small Portfolios (<$50):** Allow up to 95% allocation per position to maximize crypto exposure
+  - **Large Portfolios (>$50):** Maintain 40% max position size with 5% cash buffer
+  - **Enhanced Error Messages:** Clear differentiation between format errors and range validation errors
+  - **Conflict Resolution:** Resolved contradiction between 40% limit and small portfolio mandate
+  - **Consistent Validation:** Both Trader-AI and Supervisor-AI now use same portfolio-size-aware logic
+- **Impact:** Small portfolios ($10.53) can now execute meaningful trades without holding excessive cash
+- **Status:** ✅ PRODUCTION READY - Tested and verified working with 95% allocation scenarios, end-to-end validation confirmed
+
 ### USD Trading Configuration Verification (August 4, 2025) - CONFIRMED ✅
 - **Verification:** Confirmed bot correctly uses USD (not USDC) for all trading operations
 - **Asset Mapping:** All cryptocurrencies map to USD trading pairs (e.g., SOL → SOLUSD, BTC → XBTZUSD)
@@ -406,6 +511,22 @@ python run_multiagent_demo.py
 ```bash
 python scheduler_multiagent.py demo
 ```
+
+### Interactive Scheduler Enhancement (August 4, 2025) - IMPLEMENTED ✅
+- **Feature Added:** Real-time interactive controls for manual trading trigger and system monitoring
+- **Keyboard Controls:**
+  - **[ENTER]** - Instantly trigger trading cycle (bypasses 07:00 MST schedule)
+  - **[S]** - Display current system status and next scheduled run
+  - **[L]** - Show last portfolio equity and timestamp
+  - **[T]** - Display recent trades with transaction IDs
+  - **[Ctrl+C]** - Gracefully stop scheduler
+- **Implementation:** Windows-compatible threading for non-blocking input handling
+- **Benefits:** 
+  - Test trading logic anytime without waiting for schedule
+  - Monitor system status and performance in real-time
+  - Instant access to portfolio and trade history
+  - Professional operational interface for live trading
+- **Status:** ✅ FULLY OPERATIONAL - Enhanced user experience with live controls
 
 ### Migration from Legacy System (Updated August 2025)
 

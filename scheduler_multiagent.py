@@ -145,15 +145,32 @@ def run_multiagent_demo():
     
     run_multiagent_trading_cycle()
 
+def handle_user_input(input_queue):
+    """
+    Handle user input in a separate thread (Windows compatible).
+    """
+    while True:
+        try:
+            user_input = input().strip().lower()
+            input_queue.append(user_input)
+        except EOFError:
+            break
+
 def main():
     """
     Main scheduler function for the multi-agent trading bot.
     """
+    print("\n" + "🚀" * 25)
+    print("🤖 CHATGPT-KRAKEN MULTI-AGENT TRADING BOT")
+    print("🚀" * 25)
+    
     logger.info("🤖 Multi-Agent Trading Bot Scheduler Starting")
     logger.info("=" * 60)
-    logger.info("Architecture: Supervisor-AI → [Analyst-AI, Strategist-AI, Trader-AI]")
-    logger.info("Schedule: Daily at 07:00 MST")
-    logger.info("Mode: Advanced Multi-Agent Cognitive System")
+    logger.info("🏗️  Architecture: Supervisor-AI → [CoinGecko-AI, Analyst-AI, Strategist-AI, Trader-AI]")
+    logger.info("⏰ Schedule: Daily at 07:00 MST")
+    logger.info("🧠 Mode: Advanced Multi-Agent Cognitive System")
+    logger.info("💰 Currency: USD Trading on Kraken")
+    logger.info("📊 Logging: Trades → logs/trades.csv | Equity → logs/equity.csv")
     logger.info("=" * 60)
     
     # Schedule the multi-agent trading cycle
@@ -161,16 +178,105 @@ def main():
     schedule.every().day.at("07:00").do(run_multiagent_trading_cycle)
     
     logger.info("⏰ Scheduled daily multi-agent trading cycle for 07:00 MST")
-    logger.info("🔄 Scheduler is now running. Press Ctrl+C to stop.")
+    logger.info("")
+    logger.info("🎯 INTERACTIVE CONTROLS:")
+    logger.info("   🚀 Press [ENTER] to run trading cycle NOW")
+    logger.info("   📊 Press [S] then [ENTER] to show current status")
+    logger.info("   📈 Press [L] then [ENTER] to show last equity")
+    logger.info("   📋 Press [T] then [ENTER] to show recent trades")
+    logger.info("   🔄 Press [Ctrl+C] to stop scheduler")
+    logger.info("")
+    logger.info("🔄 Scheduler is now running...")
     logger.info("")
     
-    # Keep the scheduler running
+    # Set up input handling
+    import threading
+    from collections import deque
+    
+    input_queue = deque()
+    input_thread = threading.Thread(target=handle_user_input, args=(input_queue,), daemon=True)
+    input_thread.start()
+    
+    # Keep the scheduler running with interactive controls
     try:
         while True:
+            # Check for scheduled runs
             schedule.run_pending()
-            time.sleep(60)  # Check every minute
+            
+            # Process any user input
+            while input_queue:
+                user_input = input_queue.popleft()
+                
+                if user_input == "":  # Just Enter pressed
+                    logger.info("")
+                    logger.info("🚀 MANUAL TRIGGER: Starting trading cycle NOW!")
+                    logger.info("=" * 50)
+                    try:
+                        run_multiagent_trading_cycle()
+                        logger.info("=" * 50)
+                        logger.info("✅ Manual trading cycle completed successfully!")
+                    except Exception as e:
+                        logger.error(f"❌ Manual trading cycle failed: {e}")
+                    logger.info("")
+                    logger.info("🎯 Press [ENTER] to run again, [S] for status, [L] for equity, [T] for trades, or [Ctrl+C] to stop")
+                    logger.info("")
+                    
+                elif user_input == "s":  # Status check
+                    logger.info("")
+                    logger.info("📊 CURRENT STATUS:")
+                    logger.info(f"   ⏰ Next scheduled run: {schedule.next_run()}")
+                    logger.info(f"   🔄 Scheduler uptime: Running")
+                    logger.info(f"   📁 Logs directory: logs/")
+                    logger.info(f"   💰 Trading mode: Live (USD)")
+                    logger.info("")
+                    
+                elif user_input == "l":  # Last equity check
+                    logger.info("")
+                    logger.info("📈 CHECKING LAST EQUITY...")
+                    try:
+                        import pandas as pd
+                        import os
+                        if os.path.exists('logs/equity.csv'):
+                            # CSV has no headers: timestamp, total_equity_usd
+                            equity_df = pd.read_csv('logs/equity.csv', names=['timestamp', 'total_equity_usd'])
+                            if not equity_df.empty:
+                                last_equity = equity_df.iloc[-1]['total_equity_usd']
+                                last_time = equity_df.iloc[-1]['timestamp']
+                                logger.info(f"   💵 Last equity: ${last_equity:.2f}")
+                                logger.info(f"   📅 Last updated: {last_time}")
+                            else:
+                                logger.info("   ❌ No equity data found")
+                        else:
+                            logger.info("   ❌ Equity file not found")
+                    except Exception as e:
+                        logger.error(f"   ❌ Error reading equity: {e}")
+                    logger.info("")
+                    
+                elif user_input == "t":  # Recent trades check
+                    logger.info("")
+                    logger.info("📋 CHECKING RECENT TRADES...")
+                    try:
+                        import pandas as pd
+                        import os
+                        if os.path.exists('logs/trades.csv'):
+                            trades_df = pd.read_csv('logs/trades.csv')
+                            if not trades_df.empty:
+                                logger.info(f"   📊 Total trades: {len(trades_df)}")
+                                logger.info("   🔥 Last 3 trades:")
+                                for _, trade in trades_df.tail(3).iterrows():
+                                    logger.info(f"      • {trade['action'].upper()} {trade['volume']:.6f} {trade['pair']} (TxID: {trade['txid']})")
+                            else:
+                                logger.info("   ❌ No trades found")
+                        else:
+                            logger.info("   ❌ Trades file not found")
+                    except Exception as e:
+                        logger.error(f"   ❌ Error reading trades: {e}")
+                    logger.info("")
+            
+            time.sleep(0.5)  # Small sleep to prevent high CPU usage
             
     except KeyboardInterrupt:
+        logger.info("")
         logger.info("👋 Multi-agent scheduler stopped by user")
     except Exception as e:
         logger.error(f"💥 Scheduler error: {e}")
