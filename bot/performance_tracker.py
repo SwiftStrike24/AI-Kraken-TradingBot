@@ -45,7 +45,7 @@ class PerformanceTracker:
         try:
             trade_data = trade_result['trade']
             log_entry = {
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
                 'pair': trade_data['pair'],
                 'action': trade_data['action'],
                 'volume': trade_data['volume'],
@@ -119,7 +119,7 @@ class PerformanceTracker:
                         logger.info(f"Forex {forex_asset}: {amount} (excluded from equity calculation)")
             
             log_entry = {
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
                 'total_equity_usd': round(total_equity, 2)
             }
             

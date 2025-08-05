@@ -429,7 +429,7 @@ class SupervisorAgent(BaseAgent):
         validation_warnings = []
         
         # Check 1: Plan structure validation
-        if not trading_plan.get("trades") or not isinstance(trading_plan.get("trades"), list):
+        if "trades" not in trading_plan or not isinstance(trading_plan.get("trades"), list):
             validation_issues.append("Trading plan missing or invalid trades list")
         
         if not trading_plan.get("thesis") or not isinstance(trading_plan.get("thesis"), str):

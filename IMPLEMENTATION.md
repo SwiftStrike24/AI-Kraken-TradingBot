@@ -216,6 +216,44 @@ Primary metric: **Total return** & **Sharpe ratio** vs BTC benchmark.
 
 ## 🔧 Recent Architecture Improvements (August 2025)
 
+### Critical Bug Fix: Supervisor Validation Logic (August 4, 2025) - RESOLVED ✅
+- **Problem Solved:** Supervisor-AI was incorrectly rejecting valid trading plans with empty trades lists `[]` 
+- **Root Cause:** Validation logic used `if not trading_plan.get("trades")` which treats empty lists as falsy
+- **Solution:** Changed to `if "trades" not in trading_plan` to properly check for key existence
+- **Impact:** Trading plans with no trades (hold strategies) now correctly pass validation
+- **Status:** ✅ PRODUCTION READY - All pipeline stages working correctly
+
+### USD Trading Configuration Verification (August 4, 2025) - CONFIRMED ✅
+- **Verification:** Confirmed bot correctly uses USD (not USDC) for all trading operations
+- **Asset Mapping:** All cryptocurrencies map to USD trading pairs (e.g., SOL → SOLUSD, BTC → XBTZUSD)
+- **Performance Tracking:** Equity calculations properly handle USD as base currency
+- **Cash Handling:** USD balances treated as $1.00 per unit for equity calculations
+- **Test Coverage:** Created comprehensive live trading test (`Tests/test_usd_trading_live.py`)
+- **Status:** ✅ CONFIRMED READY - Bot will trade with your USD balance on Kraken
+
+### Live Trading Test Fixes (August 4, 2025) - RESOLVED ✅
+- **Problem Solved:** Multiple issues in live trading test preventing successful execution
+- **Issues Fixed:**
+  - **Minimum Order Size:** Kraken requires larger order volumes - increased test amount from $1 to $5
+  - **Deprecated Datetime:** Fixed Python 3.12+ compatibility with timezone-aware datetime objects
+  - **CSV Column Mismatch:** Fixed equity.csv reading to handle missing headers properly
+  - **Success Detection Logic:** Fixed test to properly detect successful trade execution
+- **Live Test Results:** Successfully executed real $5 SOL purchase (Transaction ID: OGR4IZ-OOBGP-BN5LKH)
+- **Status:** ✅ FULLY OPERATIONAL - Live USD trading confirmed working on Kraken
+
+### Trade Logging System Verification (August 4, 2025) - CONFIRMED ✅
+- **Problem Addressed:** Ensuring all executed trades are properly logged to `logs/trades.csv`
+- **Implementation:** Performance tracker automatically logs successful trades with full details
+- **Trade Log Format:** CSV with columns: timestamp, pair, action, volume, txid
+- **Integration Points:**
+  - **Supervisor Agent:** Automatically logs all successful trades during pipeline execution
+  - **Live Testing:** Manual logging in test scripts for verification
+  - **Trade Executor:** Returns detailed trade results for logging
+- **Verified Trades Logged:**
+  - `OGR4IZ-OOBGP-BN5LKH`: 0.0296 SOL bought for ~$5.00 USD
+  - `OYF53B-5HDPH-MUTK5N`: 0.0296 SOL bought for ~$5.00 USD
+- **Status:** ✅ FULLY OPERATIONAL - All trades properly logged to CSV
+
 ### Asset Pair Handling
 - **Problem Solved:** "Unknown asset pair" errors when querying prices for assets in account balance
 - **Solution:** `KrakenAPI` now fetches all valid trading pairs on initialization and creates a mapping from assets to their correct USD pair names
