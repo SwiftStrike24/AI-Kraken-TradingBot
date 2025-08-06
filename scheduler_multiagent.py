@@ -183,6 +183,7 @@ def main():
     logger.info("   🚀 Press [ENTER] to run trading cycle NOW")
     logger.info("   📊 Press [S] then [ENTER] to show current status")
     logger.info("   📈 Press [L] then [ENTER] to show last equity")
+    logger.info("   🏦 Press [P] then [ENTER] to show current portfolio")
     logger.info("   📋 Press [T] then [ENTER] to show recent trades")
     logger.info("   🔄 Press [Ctrl+C] to stop scheduler")
     logger.info("")
@@ -218,7 +219,7 @@ def main():
                     except Exception as e:
                         logger.error(f"❌ Manual trading cycle failed: {e}")
                     logger.info("")
-                    logger.info("🎯 Press [ENTER] to run again, [S] for status, [L] for equity, [T] for trades, or [Ctrl+C] to stop")
+                    logger.info("🎯 Press [ENTER] to run again, [S] for status, [L] for equity, [P] for portfolio, [T] for trades, or [Ctrl+C] to stop")
                     logger.info("")
                     
                 elif user_input == "s":  # Status check
@@ -232,24 +233,102 @@ def main():
                     
                 elif user_input == "l":  # Last equity check
                     logger.info("")
-                    logger.info("📈 CHECKING LAST EQUITY...")
+                    logger.info("📈 CHECKING LAST EQUITY & CURRENT PORTFOLIO...")
                     try:
                         import pandas as pd
                         import os
+                        
+                        # Show last logged equity
                         if os.path.exists('logs/equity.csv'):
                             # CSV has no headers: timestamp, total_equity_usd
                             equity_df = pd.read_csv('logs/equity.csv', names=['timestamp', 'total_equity_usd'])
                             if not equity_df.empty:
                                 last_equity = equity_df.iloc[-1]['total_equity_usd']
                                 last_time = equity_df.iloc[-1]['timestamp']
-                                logger.info(f"   💵 Last equity: ${last_equity:.2f}")
+                                logger.info(f"   💵 Last logged equity: ${last_equity:.2f}")
                                 logger.info(f"   📅 Last updated: {last_time}")
                             else:
                                 logger.info("   ❌ No equity data found")
                         else:
                             logger.info("   ❌ Equity file not found")
+                        
+                        # Show current live portfolio
+                        logger.info("")
+                        logger.info("🏦 CURRENT LIVE PORTFOLIO:")
+                        try:
+                            kraken_api = KrakenAPI()
+                            portfolio_data = kraken_api.get_comprehensive_portfolio_context()
+                            
+                            logger.info(f"   💰 Live total equity: ${portfolio_data['total_equity']:,.2f}")
+                            logger.info(f"   💵 Cash balance: ${portfolio_data['cash_balance']:,.2f}")
+                            logger.info(f"   🪙 Crypto value: ${portfolio_data['crypto_value']:,.2f}")
+                            
+                            if portfolio_data['usd_values']:
+                                logger.info("   📊 Current holdings:")
+                                for asset, data in sorted(portfolio_data['usd_values'].items(), 
+                                                         key=lambda x: x[1]['value'], reverse=True):
+                                    if data['value'] > 0:
+                                        allocation = portfolio_data['allocation_percentages'].get(asset, 0)
+                                        if asset == 'USD':
+                                            logger.info(f"      • USD: ${data['value']:,.2f} ({allocation:.1f}%)")
+                                        else:
+                                            logger.info(f"      • {asset}: {data['amount']:.6f} = ${data['value']:,.2f} @ ${data['price']:,.2f} ({allocation:.1f}%)")
+                            else:
+                                logger.info("   📝 No holdings found")
+                                
+                        except Exception as portfolio_error:
+                            logger.error(f"   ❌ Error fetching live portfolio: {portfolio_error}")
+                            
                     except Exception as e:
                         logger.error(f"   ❌ Error reading equity: {e}")
+                    logger.info("")
+                
+                elif user_input == "p":  # Portfolio status check
+                    logger.info("")
+                    logger.info("🏦 DETAILED PORTFOLIO STATUS...")
+                    try:
+                        kraken_api = KrakenAPI()
+                        portfolio_data = kraken_api.get_comprehensive_portfolio_context()
+                        
+                        logger.info(f"   💰 Total Portfolio Value: ${portfolio_data['total_equity']:,.2f}")
+                        logger.info(f"   💵 Cash (USD/USDC/USDT): ${portfolio_data['cash_balance']:,.2f}")
+                        logger.info(f"   🪙 Crypto Assets Value: ${portfolio_data['crypto_value']:,.2f}")
+                        logger.info(f"   🔄 Tradeable Assets: {len(portfolio_data['tradeable_assets'])}")
+                        
+                        if portfolio_data['usd_values']:
+                            logger.info("")
+                            logger.info("   📊 ASSET BREAKDOWN:")
+                            total_equity = portfolio_data['total_equity']
+                            
+                            for asset, data in sorted(portfolio_data['usd_values'].items(), 
+                                                     key=lambda x: x[1]['value'], reverse=True):
+                                if data['value'] > 0.01:  # Only show assets worth more than $0.01
+                                    allocation = (data['value'] / total_equity * 100) if total_equity > 0 else 0
+                                    
+                                    if asset == 'USD':
+                                        logger.info(f"      💵 USD Cash: ${data['value']:,.2f} ({allocation:.1f}%)")
+                                    else:
+                                        logger.info(f"      🪙 {asset}: {data['amount']:.8f}")
+                                        logger.info(f"         └─ Value: ${data['value']:,.2f} @ ${data['price']:,.2f}")
+                                        logger.info(f"         └─ Allocation: {allocation:.1f}%")
+                                        
+                                        # Check if asset can be traded
+                                        if asset in portfolio_data['tradeable_assets']:
+                                            logger.info(f"         └─ ✅ Tradeable to USD")
+                                        else:
+                                            logger.info(f"         └─ ❌ Not tradeable to USD")
+                        else:
+                            logger.info("   📝 Portfolio is empty")
+                            
+                        # Show allocation summary
+                        if portfolio_data['total_equity'] > 0:
+                            cash_pct = (portfolio_data['cash_balance'] / portfolio_data['total_equity']) * 100
+                            crypto_pct = (portfolio_data['crypto_value'] / portfolio_data['total_equity']) * 100
+                            logger.info("")
+                            logger.info(f"   🥧 ALLOCATION: {cash_pct:.1f}% Cash | {crypto_pct:.1f}% Crypto")
+                        
+                    except Exception as e:
+                        logger.error(f"   ❌ Error fetching portfolio: {e}")
                     logger.info("")
                     
                 elif user_input == "t":  # Recent trades check

@@ -5,6 +5,9 @@ import hashlib
 import hmac
 import requests
 import urllib.parse
+import logging
+
+logger = logging.getLogger(__name__)
 
 class KrakenAPIError(Exception):
     """Custom exception for Kraken API errors."""
@@ -200,26 +203,166 @@ class KrakenAPI:
         Get trading rules for all USD pairs including minimum order sizes.
         
         Returns:
-            Dictionary mapping pair names to their trading rules
+            Dictionary with pair info including minimum order sizes
         """
-        usd_pairs = {}
-        for pair_name, pair_info in self.asset_pairs.items():
-            # Only include USD pairs from our asset mapping
-            if pair_name in self.asset_to_usd_pair_map.values():
-                base_asset = pair_info.get('base', '')
-                ordermin = float(pair_info.get('ordermin', 0))
-                
-                # Clean base asset name for display
-                clean_base = base_asset[1:] if base_asset.startswith(('X', 'Z')) and len(base_asset) > 1 else base_asset
-                
-                usd_pairs[pair_name] = {
-                    'base_asset': clean_base,
-                    'ordermin': ordermin,
-                    'pair_decimals': int(pair_info.get('pair_decimals', 8)),
-                    'lot_decimals': int(pair_info.get('lot_decimals', 8))
-                }
+        trading_rules = {}
         
-        return usd_pairs
+        for pair_name, pair_info in self.asset_pairs.items():
+            # Look for pairs that trade against USD/ZUSD
+            if 'USD' in pair_name or 'ZUSD' in pair_name:
+                base_asset = pair_info.get('base', '')
+                quote_asset = pair_info.get('quote', '')
+                
+                # Check if this is a USD pair
+                if quote_asset in ['USD', 'ZUSD']:
+                    trading_rules[pair_name] = {
+                        'base': base_asset,
+                        'quote': quote_asset,
+                        'ordermin': pair_info.get('ordermin', '0.0001'),
+                        'costmin': pair_info.get('costmin', '0.5'),
+                        'tick_size': pair_info.get('tick_size', '0.01')
+                    }
+        
+        return trading_rules
+
+    def get_comprehensive_portfolio_context(self) -> dict:
+        """
+        Get comprehensive portfolio information including USD values, allocation percentages,
+        and trading context for AI decision making.
+        
+        Returns:
+            Dictionary containing:
+            - portfolio_summary: Formatted string for prompt
+            - raw_balances: Dict of asset balances
+            - usd_values: Dict of USD values per asset
+            - total_equity: Total portfolio value in USD
+            - allocation_percentages: Asset allocation as percentages
+            - tradeable_assets: List of assets that can be traded to USD
+        """
+        try:
+            # Get raw balances from Kraken
+            balance = self.get_account_balance()
+            
+            if not balance:
+                return {
+                    'portfolio_summary': "Portfolio is currently empty. No assets held.",
+                    'raw_balances': {},
+                    'usd_values': {},
+                    'total_equity': 0.0,
+                    'allocation_percentages': {},
+                    'tradeable_assets': []
+                }
+            
+            # Separate cash and crypto assets
+            cash_assets = {'USDC', 'USD', 'USDT'}
+            forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
+            
+            # Calculate total cash value
+            total_cash = 0.0
+            for cash_asset in cash_assets:
+                if cash_asset in balance:
+                    total_cash += balance[cash_asset]
+            
+            # Identify crypto assets (excluding forex)
+            crypto_assets = [asset for asset in balance.keys() 
+                           if asset not in cash_assets and asset not in forex_assets]
+            
+            # Get USD prices for crypto assets
+            usd_values = {}
+            total_crypto_value = 0.0
+            tradeable_assets = []
+            
+            if crypto_assets:
+                valid_pairs = self.get_valid_usd_pairs_for_assets(crypto_assets)
+                if valid_pairs:
+                    prices = self.get_ticker_prices(valid_pairs)
+                    
+                    for asset in crypto_assets:
+                        if asset in balance:
+                            amount = balance[asset]
+                            asset_pair = self.asset_to_usd_pair_map.get(asset)
+                            
+                            if asset_pair and asset_pair in prices:
+                                price = prices[asset_pair]['price']
+                                value = amount * price
+                                usd_values[asset] = {
+                                    'amount': amount,
+                                    'price': price,
+                                    'value': value
+                                }
+                                total_crypto_value += value
+                                tradeable_assets.append(asset)
+                            else:
+                                usd_values[asset] = {
+                                    'amount': amount,
+                                    'price': 0.0,
+                                    'value': 0.0
+                                }
+            
+            # Add cash to USD values
+            if total_cash > 0:
+                usd_values['USD'] = {
+                    'amount': total_cash,
+                    'price': 1.0,
+                    'value': total_cash
+                }
+                tradeable_assets.append('USD')
+            
+            # Calculate total equity
+            total_equity = total_cash + total_crypto_value
+            
+            # Calculate allocation percentages
+            allocation_percentages = {}
+            if total_equity > 0:
+                for asset, data in usd_values.items():
+                    allocation_percentages[asset] = (data['value'] / total_equity) * 100
+            
+            # Build formatted portfolio summary for AI prompt
+            portfolio_summary = f"Current cash balance: ${total_cash:,.2f} USD.\n"
+            
+            if crypto_assets:
+                portfolio_summary += "Current Holdings:\n"
+                for asset in sorted(crypto_assets, key=lambda x: usd_values.get(x, {}).get('value', 0), reverse=True):
+                    if asset in usd_values:
+                        data = usd_values[asset]
+                        allocation = allocation_percentages.get(asset, 0)
+                        # Only include positions worth at least $0.01 and > 0.05% allocation
+                        if data['value'] >= 0.01 and allocation >= 0.05:
+                            portfolio_summary += f"- {asset}: {data['amount']:.6f} (Value: ${data['value']:,.2f} @ ${data['price']:,.2f}) [{allocation:.1f}%]\n"
+                        # For debugging: log dust positions but don't include in AI context
+                        elif data['value'] > 0:
+                            logger.debug(f"Filtering out dust position: {asset} ${data['value']:,.3f} ({allocation:.2f}%)")
+            
+            portfolio_summary += f"\nTotal Portfolio Value: ${total_equity:,.2f} USD"
+            
+            if total_equity > 0:
+                cash_percentage = (total_cash / total_equity) * 100
+                crypto_percentage = (total_crypto_value / total_equity) * 100
+                portfolio_summary += f"\nAllocation: {cash_percentage:.1f}% Cash, {crypto_percentage:.1f}% Crypto"
+            
+            return {
+                'portfolio_summary': portfolio_summary,
+                'raw_balances': balance,
+                'usd_values': usd_values,
+                'total_equity': total_equity,
+                'allocation_percentages': allocation_percentages,
+                'tradeable_assets': tradeable_assets,
+                'cash_balance': total_cash,
+                'crypto_value': total_crypto_value
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting comprehensive portfolio context: {e}")
+            return {
+                'portfolio_summary': f"Error retrieving portfolio data: {e}",
+                'raw_balances': {},
+                'usd_values': {},
+                'total_equity': 0.0,
+                'allocation_percentages': {},
+                'tradeable_assets': [],
+                'cash_balance': 0.0,
+                'crypto_value': 0.0
+            }
 
     def place_order(self, pair, order_type, volume, ordertype='market', validate=False):
         """

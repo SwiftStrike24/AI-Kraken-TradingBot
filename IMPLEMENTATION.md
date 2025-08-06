@@ -11,6 +11,47 @@ The strategy is experimental, transparent, and performance-logged.
 
 **🚀 Major Upgrade:** Multi-agent architecture with real-time market data integration and institutional-grade AI analysis
 
+**🔧 CRITICAL BUG FIX (August 5, 2025):** Research Agent Data Flow Fix - RESOLVED ✅
+- **Problem Solved:** Daily research reports showing "Market analysis unavailable - no live news data could be gathered" despite successful news fetching
+- **Root Cause:** Duplicate RSS fetching within same execution cycle causing cache conflicts and empty headlines for AI analysis
+- **Technical Solution:** Refactored `ResearchAgent._fetch_market_summary()` to accept pre-fetched headlines as parameters instead of re-fetching
+- **Files Modified:**
+  - `bot/research_agent.py` - Enhanced method signatures and data flow to prevent duplicate fetching
+  - Improved variable scoping and exception handling for headline collections
+- **Reliability Improvements:**
+  - Removed failing RSS feed (`cryptorank.io/news/feed`) that consistently caused parsing errors
+  - Enhanced error handling with proper fallback for empty headline collections
+  - Improved feed reliability from 11/12 to 11/11 successful crypto feeds
+- **Impact:** Market intelligence quality upgraded from "fair" to "excellent" with comprehensive AI-generated analysis
+- **Validation:** Full end-to-end testing confirmed proper AI market analysis generation and successful trade execution
+- **Status:** ✅ PRODUCTION READY - Research Agent now generates institutional-grade market intelligence reliably
+
+**🔧 CRITICAL BUG FIX (August 5, 2025):** Trader Agent Validation Fix - RESOLVED ✅
+- **Problem Solved:** "Trade 1: sell allocation_percentage must be between 1% and 100%, got 0.0%" validation error preventing trade execution
+- **Root Cause:** Dust positions (e.g., $0.004 worth of SUI = 0.0% allocation) were included in portfolio context, AI attempted to sell exactly 0.0%
+- **Technical Solution:** Enhanced portfolio filtering in `bot/kraken_api.py` to exclude positions < $0.01 value and < 0.05% allocation
+- **Files Modified:**
+  - `bot/kraken_api.py` - Added dust position filtering in `get_comprehensive_portfolio_context()`
+  - `agents/trader_agent.py` - Added 0% trade handling to skip instead of error on negligible allocations
+- **Validation Enhancement:** 
+  - Positions like "SUI: 0.001190 (Value: $0.00 @ $3.37) [0.0% of portfolio]" now filtered from AI context
+  - Added fallback handling for any remaining 0.0% trades to prevent validation failures
+- **Impact:** Restored multi-agent trading pipeline reliability and eliminated validation-related trading failures
+- **Status:** ✅ PRODUCTION READY - Multi-agent system now handles dust positions gracefully
+
+**🔧 ROBUSTNESS ENHANCEMENT (August 5, 2025):** Smart Order Size Management - IMPLEMENTED ✅
+- **Enhancement:** Intelligent minimum order size awareness to prevent allocation failures
+- **Dynamic Warnings:** AI now receives portfolio-size-specific minimum order alerts (e.g., "XRP requires 60.8% of your $9.87 portfolio")
+- **Improved Error Reporting:** Fixed pair name inconsistencies in rejection messages (XRPUSD vs XXRPZUSD)
+- **Enhanced Logging:** Added detailed context for rejected trades with allocation percentages and reasoning
+- **Files Modified:**
+  - `agents/strategist_agent.py` - Added dynamic minimum order size warnings based on current portfolio value
+  - `bot/trade_executor.py` - Improved error message consistency for pair name reporting
+  - `agents/supervisor_agent.py` - Enhanced logging for rejected trades with allocation context
+- **Smart Prevention:** AI now knows that XRP minimum order (~$6.00) represents 60.8% of a $9.87 portfolio
+- **Impact:** Reduces failed trades due to minimum order size violations through proactive AI awareness
+- **Status:** ✅ PRODUCTION READY - Enhanced decision-making intelligence for small portfolio management
+
 **Key Improvements:**
 - **CoinGecko Integration:** Live price data, trending analysis, and market metrics for 10 tracked cryptocurrencies
 - **Enhanced Keyword Intelligence:** 57 crypto + 81 macro keywords capturing ETFs, institutional flows, Fed policy, and regulatory developments
@@ -18,6 +59,8 @@ The strategy is experimental, transparent, and performance-logged.
 - **Multi-Source Intelligence:** Combines quantitative CoinGecko data with qualitative news analysis for superior market context
 - **Comprehensive Coverage:** Now captures BlackRock ETF flows, MicroStrategy moves, Fed decisions, GENIUS/CLARITY Act developments, and macro trends
 - **Professional Analysis:** Institutional morning briefing format with confidence levels and specific trading opportunities
+- **🔧 OpenAI API Structure Fix:** Implemented proper system/user message separation across all agents for optimal AI performance and cost efficiency
+- **🎯 Research Agent Reliability:** Fixed duplicate fetching bug ensuring consistent market analysis generation
 
 ---
 
@@ -550,5 +593,145 @@ The enhanced multi-agent system provides significant improvements over the legac
 - Better market context awareness with real-time data integration
 - Enhanced risk assessment with macro/regulatory intelligence
 - More actionable trading insights with institutional-grade analysis
+
+---
+
+### System Message Separation Fix (August 4, 2025) - IMPLEMENTED ✅
+- **Problem Solved:** OpenAI interface showing "Add system instructions to optimize" because system instructions were embedded in user content instead of proper system messages
+- **Root Cause:** `PromptEngine.build_openai_request()` was sending all content as a single user message, including `<SYSTEM_INSTRUCTIONS>` tags within user content
+- **Solution:** Implemented proper system/user message separation following OpenAI best practices
+- **Files Modified:**
+  - **bot/prompt_engine.py**: Updated `build_openai_request()` method to extract system instructions and create proper message structure
+  - Added `_extract_system_instructions()` method to parse and separate system content from user content using regex
+- **Technical Implementation:**
+  - **Before**: `messages: [{"role": "user", "content": "<SYSTEM_INSTRUCTIONS>..."}]`
+  - **After**: `messages: [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]`
+  - Uses regex to extract content between `<SYSTEM_INSTRUCTIONS>` tags
+  - Removes system instruction tags from user content to create clean separation
+  - Maintains fallback system message if no system instructions found in template
+- **Benefits:**
+  - ✅ **OpenAI Best Practices**: Follows proper system/user message structure for optimal AI performance
+  - ✅ **Token Efficiency**: System messages are processed more efficiently than user instructions
+  - ✅ **Behavioral Consistency**: System messages provide stronger behavioral guardrails
+  - ✅ **Clean Interface**: OpenAI playground will no longer show optimization suggestions
+- **Impact:** AI responses will be more consistent and follow instructions more reliably due to proper message role separation
+- **Status:** ✅ PRODUCTION READY - Prompt engine now creates proper OpenAI message structure automatically
+
+## 🔧 Agent API Structure Fixes (August 2025)
+
+**Issue Resolved:** Multiple agents were embedding system instructions in user messages instead of using proper OpenAI message structure
+
+**Agents Fixed:**
+- **agents/trader_agent.py**: Now properly extracts system instructions from prompts and creates structured messages
+- **bot/decision_engine.py**: Updated to use PromptEngine's `build_openai_request()` method for proper message structure
+
+**Technical Changes:**
+- **trader_agent.py**: Added system instruction extraction logic and proper message array construction
+- **decision_engine.py**: Replaced manual prompt building with PromptEngine's structured request method
+- Both agents now follow the same pattern: system instructions in system role, context in user role
+
+**Result:** All OpenAI API calls now use proper system/user message separation for optimal AI performance
+
+---
+
+## 🏦 Enhanced Portfolio Awareness (August 2025)
+
+**Objective:** Ensure the trading bot is always aware of current holdings using live Kraken API data, never making assumptions about portfolio state.
+
+**Key Enhancements:**
+
+### 📊 Comprehensive Portfolio Context (`bot/kraken_api.py`)
+- **New Method:** `get_comprehensive_portfolio_context()` provides detailed portfolio analysis
+- **Features:**
+  - Live USD values for all holdings with real-time prices
+  - Asset allocation percentages calculated automatically  
+  - Distinction between cash, crypto, and forex assets
+  - Tradeable assets identification for AI strategy decisions
+  - Total equity calculation with proper asset categorization
+
+### 🎯 Decision Engine Portfolio Integration (`bot/decision_engine.py`)
+- **Enhanced Context Building:** Uses comprehensive portfolio data instead of basic balance lookup
+- **Live Data Priority:** Always queries Kraken API, never assumes or uses cached data
+- **Rich Context:** AI receives detailed allocation percentages, USD values, and tradeable asset lists
+
+### 🤖 Strategic Agent Portfolio Integration (`agents/strategist_agent.py`)
+- **Updated Method:** `get_portfolio_context()` now uses comprehensive portfolio data
+- **Advanced Analytics:** Provides allocation percentages, USD values, and portfolio metrics
+- **Enhanced Logging:** Detailed portfolio state logging for transparency
+
+### ⚡ Trade Executor Portfolio Validation (`bot/trade_executor.py`)
+- **Pre-Trade Validation:** `_validate_trade_against_holdings()` checks sufficient balance for sell orders
+- **Portfolio Impact Logging:** Shows expected allocation changes before execution
+- **Real-Time Equity:** Uses live portfolio value for percentage-based allocations
+- **Smart Validation:** Prevents trades that would exceed available balances
+
+### 🔄 7AM Review Integration
+**Daily Startup Process:**
+1. **Portfolio Discovery:** Live Kraken API query reveals exact current holdings
+2. **Context Building:** Comprehensive portfolio data fed to AI for strategy decisions
+3. **Trade Validation:** All proposed trades validated against actual balances
+4. **Impact Analysis:** Portfolio allocation changes logged and analyzed
+
+**Benefits:**
+- ✅ **No Assumptions:** Bot always knows exact current state via Kraken API
+- ✅ **Sell Order Safety:** Validates sufficient balance before attempting sales  
+- ✅ **Allocation Awareness:** AI sees percentage breakdowns for smarter rebalancing
+- ✅ **USD Value Clarity:** All holdings valued in USD for consistent decision-making
+- ✅ **Trading Pair Recognition:** Automatic identification of assets that can be traded to USD
+
+**Technical Implementation:**
+- **Real-Time Pricing:** Live Kraken ticker data for accurate USD valuations
+- **Asset Classification:** Separates cash (USD/USDC/USDT), crypto, and forex automatically
+- **Comprehensive Logging:** Detailed portfolio state and trade impact visibility
+- **Error Handling:** Graceful fallbacks if portfolio data unavailable
+
+---
+
+## 🤖 AI Portfolio Understanding Enhancement (August 2025)
+
+**Critical Issue Resolved:** AI was receiving portfolio context but not generating trades due to misunderstanding of rebalancing capabilities.
+
+**Problem Identified:**
+- AI received portfolio data (e.g., "Current holdings: ADA $9.86, Cash $0.47") 
+- AI understood it held assets but thought it couldn't trade due to "insufficient cash"
+- AI didn't realize it could **SELL existing positions** to rebalance portfolio
+- Generated empty trade lists with "DEFENSIVE_HOLDING" strategy instead of active rebalancing
+
+**Comprehensive Solution:**
+
+### 📝 Enhanced Prompt Template (`bot/prompt_template.md`)
+- **Added PORTFOLIO REBALANCING section:** Explicitly explains AI can sell existing positions
+- **Added SELL EXISTING HOLDINGS directive:** Clear instruction to generate sell orders for rebalancing
+- **Added concrete example:** Shows exact JSON format for selling ADA and buying ETH/BTC
+- **Clarified constraints:** Removed ambiguity about cash limitations vs rebalancing capabilities
+
+### 🎯 Enhanced Portfolio Context (`agents/strategist_agent.py`)
+- **Expanded portfolio description:** Now includes total portfolio value and allocation percentages
+- **Added TRADING OPPORTUNITIES section:** Explicitly lists rebalancing capabilities
+- **Cash constraint clarity:** Explains that limited cash doesn't prevent selling existing positions
+- **Position-level details:** Shows allocation percentages for each holding
+
+### 🔧 Fixed Trading Rules Formatting (`agents/strategist_agent.py`)
+- **Corrected field references:** Fixed 'base_asset' → 'base' field mapping error
+- **Added rebalancing guidance:** Clear rules about selling any currently held asset
+- **Removed cash constraints:** Explicitly states "NO CASH CONSTRAINTS" for rebalancing
+- **Strategic direction:** Added selling strategy explanation for portfolio transitions
+
+### 🎯 AI Training Improvements
+**Before:** 
+```
+AI sees: "ADA: $9.86, Cash: $0.47"
+AI thinks: "Not enough cash to buy anything, must hold"
+AI output: {"trades": [], "strategy": "DEFENSIVE_HOLDING"}
+```
+
+**After:**
+```
+AI sees: "ADA: $9.86 (95.4%), Cash: $0.47 (4.6%) - You can SELL any holdings to rebalance"
+AI thinks: "I can sell ADA to buy ETH/BTC based on market analysis"
+AI output: {"trades": [{"pair": "ADAUSD", "action": "sell", "allocation_percentage": 0.95}, {"pair": "ETHUSD", "action": "buy", "allocation_percentage": 0.60}]}
+```
+
+**Result:** AI now understands it can actively rebalance portfolios by selling existing positions to fund new investment strategies based on market analysis.
 
 ---

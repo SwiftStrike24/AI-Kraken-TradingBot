@@ -466,11 +466,16 @@ class SupervisorAgent(BaseAgent):
                     portfolio_value = self._get_portfolio_value()
                     max_allocation = 0.95 if portfolio_value < 50 else 0.4
                     
-                    if not (0.01 <= allocation <= max_allocation):
-                        if portfolio_value < 50:
-                            validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-95% for small portfolios <$50)")
-                        else:
-                            validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-40% for portfolios >$50)")
+                    # Allow sell orders to exceed the max allocation for rebalancing
+                    if trade.get('action') == 'sell':
+                        if not (0.01 <= allocation <= 1.0): # Allow up to 100% for sells
+                            validation_issues.append(f"Trade {i+1}: Invalid sell allocation {allocation*100:.1f}% (must be 1-100%)")
+                    else: # Buy orders
+                        if not (0.01 <= allocation <= max_allocation):
+                            if portfolio_value < 50:
+                                validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-95% for small portfolios <$50)")
+                            else:
+                                validation_issues.append(f"Trade {i+1}: Invalid allocation {allocation*100:.1f}% (must be 1-40% for portfolios >$50)")
                 except Exception as e:
                     # Fallback to 40% limit if portfolio value can't be determined
                     self.logger.warning(f"Could not determine portfolio value for validation: {e}")
@@ -618,9 +623,14 @@ class SupervisorAgent(BaseAgent):
                 if result.get("status") == "success":
                     self.performance_tracker.log_trade(result)
                 elif result.get("status") == "volume_too_small":
-                    # Log rejected trade for auditing
+                    # Log rejected trade for auditing with enhanced details
                     original_trade = result.get("trade", {})
                     rejection_reason = result.get("error", "Volume below minimum order size")
+                    
+                    # Add debugging context
+                    allocation_pct = original_trade.get('allocation_percentage', 0) * 100
+                    self.logger.warning(f"💸 Trade rejected: {original_trade.get('pair', 'unknown')} at {allocation_pct:.1f}% allocation - {rejection_reason}")
+                    
                     self.performance_tracker.log_rejected_trade(original_trade, rejection_reason)
             
             execution_summary = {

@@ -1,0 +1,4 @@
+timestamp,requested_pair,action,allocation_percentage,confidence_score,reasoning,rejection_reason
+2025-08-05T18:26:58.197202Z,XXRPZUSD,buy,0.5,0.8,"XRP shows potential resilience with DeFi integration on Flare and is approaching a critical price level, suggesting a strong entry point.",Volume 1.69801376 below minimum order size 2.00000000 for XXRPZUSD
+2025-08-05T18:26:58.199838Z,XETHZUSD,buy,0.45,0.75,"Ethereum's strategic updates and treasury accumulation indicate strong fundamentals despite recent outflows, presenting a buying opportunity.",Volume 0.00125592 below minimum order size 0.00200000 for XETHZUSD
+2025-08-05T19:42:37.154851Z,XRPUSD,buy,0.45,0.75,"XRP is positioned for a potential rebound following recent price declines, with analysts suggesting a temporary blip before a surge.",Volume 1.51110302 below minimum order size 2.00000000 for XXRPZUSD

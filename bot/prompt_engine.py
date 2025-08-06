@@ -226,10 +226,7 @@ class PromptEngine:
     def build_openai_request(self, portfolio_context: str, research_report: str, 
                            last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o") -> dict:
         """
-        Build complete OpenAI API request object (future-proofing for tool use).
-        
-        V1 Implementation: Returns basic chat completion request
-        V2 Future: Will support tools and function calling
+        Build complete OpenAI API request object with proper system/user message separation.
         
         Args:
             portfolio_context: Current portfolio state
@@ -240,19 +237,51 @@ class PromptEngine:
             model: OpenAI model to use
             
         Returns:
-            Complete request object for OpenAI API
+            Complete request object for OpenAI API with proper message structure
         """
         prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data, trading_rules)
         
-        # V1: Basic implementation
+        # Extract system instructions from prompt
+        system_instructions, user_content = self._extract_system_instructions(prompt)
+        
+        # Build proper message structure following OpenAI best practices
+        messages = []
+        
+        if system_instructions:
+            messages.append({"role": "system", "content": system_instructions})
+        
+        messages.append({"role": "user", "content": user_content})
+        
         request = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "response_format": {"type": "json_object"}
         }
         
-        # V2 Future: Add tools support
-        # request["tools"] = [...]
-        # request["tool_choice"] = "auto"
-        
         return request
+    
+    def _extract_system_instructions(self, prompt: str) -> tuple[str, str]:
+        """
+        Extract system instructions from prompt and return separated content.
+        
+        Args:
+            prompt: Full prompt with embedded system instructions
+            
+        Returns:
+            Tuple of (system_instructions, user_content)
+        """
+        import re
+        
+        # Extract content between <SYSTEM_INSTRUCTIONS> tags
+        system_match = re.search(r'<SYSTEM_INSTRUCTIONS>\s*(.*?)\s*</SYSTEM_INSTRUCTIONS>', prompt, re.DOTALL)
+        
+        if system_match:
+            system_instructions = system_match.group(1).strip()
+            # Remove system instructions from the prompt to create clean user content
+            user_content = re.sub(r'<SYSTEM_INSTRUCTIONS>.*?</SYSTEM_INSTRUCTIONS>\s*', '', prompt, flags=re.DOTALL).strip()
+        else:
+            # Fallback if no system instructions found
+            system_instructions = "You are a world-class, professional-grade crypto portfolio strategist. Your sole objective is to generate maximum alpha against BTC and ETH benchmarks under the given constraints. You are analytical, data-driven, and concise. You operate based *only* on the data provided within the <CONTEXT> tags. Your entire response MUST be a single, valid JSON object and nothing else."
+            user_content = prompt
+        
+        return system_instructions, user_content

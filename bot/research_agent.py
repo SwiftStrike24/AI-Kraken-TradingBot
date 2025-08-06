@@ -60,7 +60,8 @@ class ResearchAgent:
             "https://beincrypto.com/feed/",
             # Additional verified sources
             "https://blockchain.news/rss",
-            "https://cryptorank.io/news/feed"
+            # Removed "https://cryptorank.io/news/feed" due to consistent parsing failures
+            # Consider adding more reliable sources in future updates
         ]
         
         # Financial/macro RSS feeds (VERIFIED WORKING as of August 2025 - Full Political Spectrum for Balanced Analysis)
@@ -389,22 +390,28 @@ class ResearchAgent:
             "macro/regulatory news"
         )
     
-    def _fetch_market_summary(self, coingecko_data: Dict[str, Any] = None) -> str:
+    def _fetch_market_summary(self, coingecko_data: Dict[str, Any] = None, 
+                              crypto_headlines: List[str] = None, 
+                              macro_headlines: List[str] = None) -> str:
         """
-        Generate AI-powered market analysis based on all gathered headlines and real-time market data.
+        Generate AI-powered market analysis based on provided headlines and real-time market data.
         Synthesizes crypto news, macro news, and quantitative market data into actionable insights.
         
         Args:
             coingecko_data: Real-time market data from CoinGecko API (optional)
+            crypto_headlines: Pre-fetched crypto news headlines (optional)
+            macro_headlines: Pre-fetched macro news headlines (optional)
         """
         try:
             if not self.openai_client:
                 logger.warning("OpenAI client not available - using fallback summary")
                 return "Market analysis based on live data feeds. AI analysis unavailable."
             
-            # Gather all headlines for analysis
-            crypto_headlines = self._fetch_crypto_news()
-            macro_headlines = self._fetch_macro_news()
+            # Use provided headlines or fetch fresh ones if not provided
+            if crypto_headlines is None:
+                crypto_headlines = self._fetch_crypto_news()
+            if macro_headlines is None:
+                macro_headlines = self._fetch_macro_news()
             
             # If no news available, return fallback
             if not crypto_headlines and not macro_headlines:
@@ -558,6 +565,10 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
         report_sections = []
         current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         
+        # Initialize headline collections
+        crypto_headlines = []
+        macro_headlines = []
+        
         # Header
         report_sections.append(f"# Daily Market Research Report")
         report_sections.append(f"**Generated:** {current_time}")
@@ -581,6 +592,7 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
         
         except Exception as e:
             logger.error(f"Error fetching crypto news: {e}")
+            crypto_headlines = []  # Ensure it's an empty list for market summary
             report_sections.append("## 📰 Crypto News Headlines")
             report_sections.append(f"- [ERROR] Failed to fetch live crypto news: {str(e)}")
             report_sections.append("")
@@ -603,14 +615,15 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
         
         except Exception as e:
             logger.error(f"Error fetching macro news: {e}")
+            macro_headlines = []  # Ensure it's an empty list for market summary
             report_sections.append("## 🏛️ Macro & Regulatory Updates")
             report_sections.append(f"- [ERROR] Failed to fetch live macro news: {str(e)}")
             report_sections.append("")
         
         try:
-            # Add AI-generated market analysis
+            # Add AI-generated market analysis using already-fetched headlines
             logger.info("Generating AI market context analysis...")
-            market_summary = self._fetch_market_summary(coingecko_data)
+            market_summary = self._fetch_market_summary(coingecko_data, crypto_headlines, macro_headlines)
             
             report_sections.append("## 📊 Market Context")
             report_sections.append("**AI-Generated Market Analysis:**")

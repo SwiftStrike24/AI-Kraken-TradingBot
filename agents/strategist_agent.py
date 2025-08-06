@@ -75,7 +75,7 @@ class StrategistAgent(BaseAgent):
             supervisor_directives = inputs.get('supervisor_directives', {})
             
             # Gather portfolio context
-            portfolio_context = self._gather_portfolio_context()
+            portfolio_context = self.get_portfolio_context()
             
             # Gather historical performance context
             performance_context = self._gather_performance_context()
@@ -115,69 +115,42 @@ class StrategistAgent(BaseAgent):
             self.logger.error(f"Strategic prompt construction failed: {e}")
             raise
     
-    def _gather_portfolio_context(self) -> Dict[str, Any]:
+    def get_portfolio_context(self) -> dict:
         """
-        Gather current portfolio state and balance information.
+        Gather current portfolio state and balance information using live Kraken API data.
         
         Returns:
-            Structured portfolio context data
+            Comprehensive portfolio context data including USD values and allocations
         """
         try:
-            # Get current balance from Kraken
-            balance = self.kraken_api.get_account_balance()
+            # Get comprehensive portfolio data from Kraken API (always live, never assume)
+            portfolio_data = self.kraken_api.get_comprehensive_portfolio_context()
             
-            if not balance:
-                return {
-                    "status": "empty",
-                    "cash_balance": 0.0,
-                    "holdings": [],
-                    "total_positions": 0
-                }
+            self.logger.info(f"Live portfolio retrieved: Total equity ${portfolio_data['total_equity']:,.2f}")
+            self.logger.info(f"Current holdings: {list(portfolio_data['raw_balances'].keys())}")
             
-            # Process cash balances
-            cash_assets = {'USDC', 'USD', 'USDT'}
-            total_cash = 0.0
-            
-            for cash_asset in cash_assets:
-                if cash_asset in balance:
-                    total_cash += balance.pop(cash_asset, 0.0)
-            
-            # Process crypto holdings
+            # Convert to format expected by strategist logic
             holdings = []
-            if balance:
-                # Filter out forex assets
-                forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
-                crypto_assets = [asset for asset in balance.keys() if asset not in forex_assets]
-                
-                if crypto_assets:
-                    valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
-                    
-                    if valid_pairs:
-                        prices = self.kraken_api.get_ticker_prices(valid_pairs)
-                        
-                        for asset, amount in balance.items():
-                            if asset in crypto_assets:
-                                asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
-                                if asset_pair and asset_pair in prices:
-                                    price = prices[asset_pair]['price']
-                                    value = amount * price
-                                    holdings.append({
-                                        "asset": asset,
-                                        "amount": amount,
-                                        "price": price,
-                                        "value": value,
-                                        "pair": asset_pair
-                                    })
-            
-            total_portfolio_value = total_cash + sum(h["value"] for h in holdings)
+            for asset, value_data in portfolio_data['usd_values'].items():
+                if asset != 'USD' and value_data['value'] > 0:  # Exclude USD cash from holdings list
+                    holdings.append({
+                        'asset': asset,
+                        'amount': value_data['amount'],
+                        'usd_price': value_data['price'],
+                        'usd_value': value_data['value'],
+                        'allocation_pct': portfolio_data['allocation_percentages'].get(asset, 0)
+                    })
             
             return {
-                "status": "active",
-                "cash_balance": total_cash,
+                "status": "active" if portfolio_data['total_equity'] > 0 else "empty",
+                "cash_balance": portfolio_data['cash_balance'],
                 "holdings": holdings,
                 "total_positions": len(holdings),
-                "total_portfolio_value": total_portfolio_value,
-                "cash_percentage": (total_cash / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
+                "total_equity": portfolio_data['total_equity'],
+                "allocation_percentages": portfolio_data['allocation_percentages'],
+                "tradeable_assets": portfolio_data['tradeable_assets'],
+                "crypto_value": portfolio_data['crypto_value'],
+                "raw_portfolio_data": portfolio_data  # Full data for advanced analysis
             }
             
         except Exception as e:
@@ -187,7 +160,12 @@ class StrategistAgent(BaseAgent):
                 "error_message": str(e),
                 "cash_balance": 0.0,
                 "holdings": [],
-                "total_positions": 0
+                "total_positions": 0,
+                "total_equity": 0.0,
+                "allocation_percentages": {},
+                "tradeable_assets": [],
+                "crypto_value": 0.0,
+                "raw_portfolio_data": {}
             }
     
     def _gather_performance_context(self) -> Dict[str, Any]:
@@ -303,6 +281,7 @@ class StrategistAgent(BaseAgent):
     def _gather_trading_rules(self) -> str:
         """
         Gather trading rules and constraints from Kraken, format for AI consumption.
+        Includes dynamic minimum order size warnings based on current portfolio size.
         
         Returns:
             Formatted trading rules string for prompt injection.
@@ -318,21 +297,55 @@ class StrategistAgent(BaseAgent):
             rules_text = "VALID KRAKEN USD TRADING PAIRS & MINIMUM ORDER SIZES:\n\n"
             
             # Sort pairs by base asset for better readability
-            sorted_pairs = sorted(usd_pairs.items(), key=lambda x: x[1]['base_asset'])
+            sorted_pairs = sorted(usd_pairs.items(), key=lambda x: x[1]['base'])
             
             for pair_name, pair_info in sorted_pairs:
-                base_asset = pair_info['base_asset']
-                ordermin = pair_info['ordermin']
+                base_asset = pair_info['base']
+                ordermin = float(pair_info['ordermin'])
                 
-                rules_text += f"✅ {pair_name} ({base_asset}/USD)\n"
-                rules_text += f"   - Minimum order size: {ordermin:.8f} {base_asset}\n"
+                # Clean base asset name for display
+                clean_base = base_asset[1:] if base_asset.startswith(('X', 'Z')) and len(base_asset) > 1 else base_asset
+                
+                rules_text += f"✅ {pair_name} ({clean_base}/USD)\n"
+                rules_text += f"   - Minimum order size: {ordermin:.8f} {clean_base}\n"
                 rules_text += f"   - Use exact pair name: '{pair_name}'\n\n"
             
             rules_text += "\n🚨 CRITICAL TRADING REQUIREMENTS:\n"
             rules_text += "1. Use ONLY the exact pair names listed above (e.g., 'XETHZUSD', not 'ETHUSD')\n"
             rules_text += "2. Ensure your trade volume meets the minimum order size for each pair\n"
             rules_text += "3. Calculate trade volume: (allocation_percentage × portfolio_value) ÷ asset_price\n"
-            rules_text += "4. If calculated volume < ordermin, either increase allocation or skip the trade\n\n"
+            rules_text += "4. If calculated volume < ordermin, either increase allocation or skip the trade\n"
+            rules_text += "5. PORTFOLIO REBALANCING: You can sell ANY asset you currently hold to free up capital\n"
+            rules_text += "6. SELLING STRATEGY: To rebalance from Asset A to Asset B, sell allocation_percentage of Asset A, then buy Asset B\n"
+            rules_text += "7. NO CASH CONSTRAINTS: Even with limited cash, you can sell existing positions to fund new trades\n"
+            # Add dynamic minimum order size warnings based on portfolio size
+            try:
+                portfolio_context = self.get_portfolio_context()
+                portfolio_value = portfolio_context.get('total_equity', 0)
+                
+                rules_text += "\n⚠️ MINIMUM ORDER SIZE AWARENESS:\n"
+                rules_text += f"Current portfolio value: ${portfolio_value:.2f}\n"
+                
+                if portfolio_value < 50:
+                    rules_text += "⚠️ SMALL PORTFOLIO WARNING: Be extremely careful with minimum order sizes!\n"
+                    rules_text += "- XRP requires minimum 2.0 XRP (~$6.00) = {:.1f}% of your portfolio\n".format(6.00/portfolio_value*100 if portfolio_value > 0 else 0)
+                    rules_text += "- ETH requires minimum 0.002 ETH (~$7.00) = {:.1f}% of your portfolio\n".format(7.00/portfolio_value*100 if portfolio_value > 0 else 0)
+                    rules_text += "- BTC requires minimum 0.00005 BTC (~$5.50) = {:.1f}% of your portfolio\n".format(5.50/portfolio_value*100 if portfolio_value > 0 else 0)
+                    rules_text += "- Consider avoiding assets where minimum order exceeds 15% of portfolio\n"
+                else:
+                    rules_text += "For your portfolio size, most minimum order requirements should be manageable.\n"
+                    rules_text += "- XRP minimum: 2.0 XRP (~$6.00)\n"
+                    rules_text += "- ETH minimum: 0.002 ETH (~$7.00)\n"
+                    rules_text += "- BTC minimum: 0.00005 BTC (~$5.50)\n"
+                rules_text += "\n"
+                
+            except Exception as e:
+                # Fallback to static warnings if portfolio data unavailable
+                rules_text += "\n⚠️ MINIMUM ORDER SIZE AWARENESS:\n"
+                rules_text += "Be careful with minimum order sizes - check portfolio value vs. minimums\n"
+                rules_text += "- XRP requires minimum 2.0 XRP (~$6.00)\n"
+                rules_text += "- ETH requires minimum 0.002 ETH (~$7.00)\n"
+                rules_text += "- BTC requires minimum 0.00005 BTC (~$5.50)\n\n"
             
             rules_text += f"📊 Total tradeable pairs: {len(usd_pairs)}\n"
             rules_text += f"🔄 Rules updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
@@ -449,13 +462,35 @@ class StrategistAgent(BaseAgent):
         if portfolio_context.get('status') == 'error':
             return f"Portfolio data unavailable due to error: {portfolio_context.get('error_message', 'unknown error')}"
         
-        text_parts = [f"Current cash balance: ${portfolio_context.get('cash_balance', 0):.2f} USD."]
+        # Build comprehensive portfolio description
+        cash_balance = portfolio_context.get('cash_balance', 0)
+        total_equity = portfolio_context.get('total_equity', 0)
+        
+        text_parts = [f"Current cash balance: ${cash_balance:.2f} USD."]
+        text_parts.append(f"Total portfolio value: ${total_equity:.2f} USD.")
         
         holdings = portfolio_context.get('holdings', [])
         if holdings:
             text_parts.append("Current Holdings:")
             for holding in holdings:
-                text_parts.append(f"- {holding['asset']}: {holding['amount']:.6f} (Value: ${holding['value']:.2f} @ ${holding['price']:.2f})")
+                asset = holding['asset']
+                amount = holding['amount']
+                usd_value = holding['usd_value']
+                usd_price = holding['usd_price']
+                allocation_pct = holding.get('allocation_pct', 0)
+                
+                text_parts.append(f"- {asset}: {amount:.6f} (Value: ${usd_value:.2f} @ ${usd_price:.2f}) [{allocation_pct:.1f}% of portfolio]")
+            
+            # Add trading capabilities context
+            text_parts.append("")
+            text_parts.append("TRADING OPPORTUNITIES:")
+            text_parts.append("- You can SELL any current holdings to reallocate capital")
+            text_parts.append("- You can BUY new positions using available cash or proceeds from sales")
+            text_parts.append("- Current positions are NOT locked - you can rebalance as needed")
+            
+            if cash_balance < 1.0:
+                text_parts.append(f"- Limited cash (${cash_balance:.2f}) available, but you can sell existing positions to fund new trades")
+            
         else:
             text_parts.append("No crypto assets held.")
         
@@ -557,9 +592,9 @@ class StrategistAgent(BaseAgent):
         
         cash = portfolio_context.get('cash_balance', 0)
         positions = portfolio_context.get('total_positions', 0)
-        total_value = portfolio_context.get('total_portfolio_value', 0)
+        total_value = portfolio_context.get('total_equity', 0)
         
-        return f"${total_value:.2f} total value, {positions} positions, ${cash:.2f} cash ({portfolio_context.get('cash_percentage', 0):.1f}%)"
+        return f"${total_value:.2f} total value, {positions} positions, ${cash:.2f} cash ({portfolio_context.get('allocation_percentages', {}).get('USD', 0):.1f}%)"
     
     def _extract_performance_summary(self, performance_context: Dict[str, Any]) -> str:
         """Extract a concise summary of performance data."""
@@ -585,9 +620,9 @@ class StrategistAgent(BaseAgent):
         """Create a structured summary of the portfolio."""
         return {
             "status": portfolio_context.get('status', 'unknown'),
-            "total_value": portfolio_context.get('total_portfolio_value', 0),
+            "total_value": portfolio_context.get('total_equity', 0),
             "position_count": portfolio_context.get('total_positions', 0),
-            "cash_percentage": portfolio_context.get('cash_percentage', 0),
+            "cash_percentage": portfolio_context.get('allocation_percentages', {}).get('USD', 0),
             "assets": [h.get('asset', '') for h in portfolio_context.get('holdings', [])]
         }
     

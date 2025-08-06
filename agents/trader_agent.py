@@ -118,10 +118,25 @@ class TraderAgent(BaseAgent):
             self.logger.info(f"Calling OpenAI API with model: {model}")
             self.logger.debug(f"Prompt length: {len(prompt_text)} characters")
             
-            # Make the API call
+            # Import PromptEngine to properly structure the request
+            from bot.prompt_engine import PromptEngine
+            
+            # Create temporary PromptEngine instance for message structure
+            temp_engine = PromptEngine()
+            
+            # Extract system instructions from prompt and build proper request
+            system_instructions, user_content = temp_engine._extract_system_instructions(prompt_text)
+            
+            # Build proper message structure
+            messages = []
+            if system_instructions:
+                messages.append({"role": "system", "content": system_instructions})
+            messages.append({"role": "user", "content": user_content})
+            
+            # Make the API call with proper message structure
             response = self.openai_client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt_text}],
+                messages=messages,
                 response_format={"type": "json_object"},
                 temperature=temperature,
                 max_tokens=max_tokens
@@ -186,7 +201,8 @@ class TraderAgent(BaseAgent):
             validated_trades = []
             for i, trade in enumerate(trades):
                 validated_trade = self._validate_trade_format(trade, i, portfolio_value)
-                validated_trades.append(validated_trade)
+                if validated_trade is not None:  # Skip None trades (0% allocations)
+                    validated_trades.append(validated_trade)
             
             # Validate thesis
             thesis = decision.get('thesis', '')
@@ -261,11 +277,21 @@ class TraderAgent(BaseAgent):
                 # For larger portfolios, enforce 40% max position size
                 max_allocation = 0.95 if portfolio_value < 50 else 0.4
                 
-                if not (0.01 <= allocation_percentage <= max_allocation):
-                    if portfolio_value < 50:
-                        raise ValueError(f"Trade {index}: allocation_percentage must be between 1% and 95% for small portfolios (<$50), got {allocation_percentage*100:.1f}%")
-                    else:
-                        raise ValueError(f"Trade {index}: allocation_percentage must be between 1% and 40% for portfolios >$50, got {allocation_percentage*100:.1f}%")
+                # Skip trades with 0% allocation (dust amounts)
+                if allocation_percentage == 0.0:
+                    self.logger.warning(f"Trade {index}: Skipping trade with 0% allocation for {pair}")
+                    return None  # Signal to skip this trade
+                
+                # Allow sell orders to exceed the max allocation to enable full position exits
+                if action == 'sell':
+                    if not (0.01 <= allocation_percentage <= 1.0): # Allow up to 100% for sells
+                        raise ValueError(f"Trade {index}: sell allocation_percentage must be between 1% and 100%, got {allocation_percentage*100:.1f}%")
+                else: # Buy orders
+                    if not (0.01 <= allocation_percentage <= max_allocation):
+                        if portfolio_value < 50:
+                            raise ValueError(f"Trade {index}: allocation_percentage must be between 1% and 95% for small portfolios (<$50), got {allocation_percentage*100:.1f}%")
+                        else:
+                            raise ValueError(f"Trade {index}: allocation_percentage must be between 1% and 40% for portfolios >$50, got {allocation_percentage*100:.1f}%")
                         
             except (ValueError, TypeError) as e:
                 if "allocation_percentage must be between" in str(e):

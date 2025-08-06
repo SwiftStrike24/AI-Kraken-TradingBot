@@ -42,87 +42,33 @@ class DecisionEngine:
 
     def _get_context(self) -> dict:
         """
-        Fetches all dynamic data required for building the prompt.
+        Fetches all dynamic data required for building the prompt using live Kraken API data.
 
         Returns:
-            A dictionary containing portfolio status and historical thesis.
+            A dictionary containing comprehensive portfolio status and historical thesis.
         """
         try:
-            # 1. Get current portfolio from Kraken
-            balance = self.kraken_api.get_account_balance()
-            if not balance:
-                portfolio_context = "Portfolio is currently empty. Cash on hand: 0 USDC."
-            else:
-                # Handle cash balances (treat as $1.00 per unit for USD-denominated assets)
-                cash_assets = {'USDC', 'USD', 'USDT'}
-                total_cash = 0.0
-                
-                for cash_asset in cash_assets:
-                    if cash_asset in balance:
-                        total_cash += balance.pop(cash_asset, 0.0)
-                
-                portfolio_context = f"Current cash balance: ${total_cash:,.2f} USD.\n"
-                
-                if balance: # If there are other crypto assets (excluding fiat)
-                    # Filter out forex assets that we don't want to trade
-                    forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
-                    crypto_assets = [asset for asset in balance.keys() if asset not in forex_assets]
-                    
-                    logger.info(f"Crypto assets in balance: {crypto_assets}")
-                    if forex_assets.intersection(balance.keys()):
-                        logger.info(f"Forex assets found (excluded from trading): {forex_assets.intersection(balance.keys())}")
-                    
-                    if crypto_assets:
-                        valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
-                        logger.info(f"Valid USD pairs found: {valid_pairs}")
-                        
-                        if valid_pairs:
-                            prices = self.kraken_api.get_ticker_prices(valid_pairs)
-                            logger.info(f"Price data received for {len(prices)} pairs")
-                            
-                            portfolio_context += "Current Holdings:\n"
-                            for asset, amount in balance.items():
-                                if asset in crypto_assets:
-                                    # Find the corresponding USD pair for this crypto asset
-                                    asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
-                                    if asset_pair and asset_pair in prices:
-                                        price = prices[asset_pair]['price']
-                                        value = amount * price
-                                        portfolio_context += f"- {asset}: {amount:.6f} (Value: ${value:,.2f} @ ${price:,.2f})\n"
-                                    else:
-                                        portfolio_context += f"- {asset}: {amount:.6f} (No USD pair available)\n"
-                                        logger.warning(f"No valid USD pair found for crypto asset: {asset}")
-                                else:
-                                    # For forex assets, just show the amount without valuation
-                                    portfolio_context += f"- {asset}: {amount:.6f} (Forex - not traded)\n"
-                        else:
-                            portfolio_context += "Current Holdings:\n"
-                            for asset, amount in balance.items():
-                                if asset in crypto_assets:
-                                    portfolio_context += f"- {asset}: {amount:.6f} (No USD pair available)\n"
-                                else:
-                                    portfolio_context += f"- {asset}: {amount:.6f} (Forex - not traded)\n"
-                            logger.warning("No valid USD pairs found for any crypto assets in balance")
-                    else:
-                        # Only forex assets remain
-                        if balance:
-                            portfolio_context += "Current Holdings:\n"
-                            for asset, amount in balance.items():
-                                portfolio_context += f"- {asset}: {amount:.6f} (Forex - not traded)\n"
-                else:
-                    portfolio_context += "No crypto assets held."
-
-            # 2. Get the last thesis
+            # Get comprehensive portfolio data from Kraken API (never assume, always query live)
+            portfolio_data = self.kraken_api.get_comprehensive_portfolio_context()
+            
+            logger.info(f"Live portfolio retrieved: Total equity ${portfolio_data['total_equity']:,.2f}")
+            logger.info(f"Tradeable assets: {portfolio_data['tradeable_assets']}")
+            
+            # Get the last thesis
             if os.path.exists(self.thesis_log_path):
                 with open(self.thesis_log_path, 'r', encoding='utf-8') as f:
                     # Read all theses and grab the last one. Assumes theses are separated by '---'.
                     theses = f.read().split('---')
                     last_thesis = theses[-1].strip() if theses else "No previous thesis found."
             else:
-                last_thesis = "No thesis log found. This is the first run."
+                last_thesis = "No previous thesis found."
 
-            return {"portfolio": portfolio_context, "thesis": last_thesis}
-
+            return {
+                'portfolio': portfolio_data['portfolio_summary'],
+                'portfolio_data': portfolio_data,  # Full data for advanced logic
+                'thesis': last_thesis
+            }
+            
         except Exception as e:
             logger.error(f"Error getting context: {e}")
             raise DecisionEngineError(f"Could not get context: {e}")
@@ -143,21 +89,19 @@ class DecisionEngine:
         try:
             # Get context and build prompt using the advanced PromptEngine
             context = self._get_context()
-            prompt = self.prompt_engine.build_prompt(
+            
+            # Use the PromptEngine's build_openai_request method for proper message structure
+            request_obj = self.prompt_engine.build_openai_request(
                 portfolio_context=context['portfolio'],
                 research_report=research_report,
                 last_thesis=context['thesis']
             )
             
-            logger.info("Generating AI strategy using PromptEngine. Sending prompt to OpenAI...")
-            logger.debug(f"Full prompt:\n{prompt}")
+            logger.info("Generating AI strategy using PromptEngine. Sending structured request to OpenAI...")
+            logger.debug(f"Request structure: {len(request_obj['messages'])} messages")
 
-            # Call OpenAI API with the structured prompt
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
+            # Call OpenAI API with the structured request
+            response = self.client.chat.completions.create(**request_obj)
             
             response_content = response.choices[0].message.content
             logger.info("Received raw response from OpenAI.")
