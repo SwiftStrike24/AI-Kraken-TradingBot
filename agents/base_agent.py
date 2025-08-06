@@ -12,8 +12,10 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 
+from bot.logger import get_logger
+
 # Set up logging
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class BaseAgent(ABC):
     """
@@ -53,7 +55,7 @@ class BaseAgent(ABC):
             self.session_transcript_dir = os.path.join(self.daily_transcript_dir, time_folder)
             os.makedirs(self.session_transcript_dir, exist_ok=True)
         
-        self.logger = logging.getLogger(f"agents.{agent_name.lower().replace('-', '_')}")
+        self.logger = get_logger(f"agents.{agent_name.lower().replace('-', '_')}")
     
     def log_thoughts(self, inputs: Dict[str, Any], reasoning: str, outputs: Dict[str, Any]) -> str:
         """

@@ -15,7 +15,7 @@ from datetime import datetime
 from .base_agent import BaseAgent
 from bot.research_agent import ResearchAgent, ResearchAgentError
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class AnalystAgent(BaseAgent):
     """

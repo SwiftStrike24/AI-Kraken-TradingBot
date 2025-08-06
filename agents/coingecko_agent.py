@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 from .base_agent import BaseAgent
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class CoinGeckoAPIError(Exception):
     """Custom exception for CoinGecko API errors."""

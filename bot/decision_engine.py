@@ -5,10 +5,11 @@ from openai import OpenAI, APIError
 
 from bot.kraken_api import KrakenAPI
 from bot.prompt_engine import PromptEngine, PromptEngineError
+from bot.logger import get_logger
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = get_logger(__name__)
 
 class DecisionEngineError(Exception):
     """Custom exception for errors within the Decision Engine."""

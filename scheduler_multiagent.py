@@ -10,17 +10,23 @@ from datetime import datetime
 # Import the multi-agent system
 from agents import SupervisorAgent
 from bot.kraken_api import KrakenAPI, KrakenAPIError
+from bot.logger import setup_colored_logging, get_logger
 
 # Set up logging to a file and to the console
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("logs/scheduler_multiagent.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+#     handlers=[
+#         logging.FileHandler("logs/scheduler_multiagent.log"),
+#         logging.StreamHandler()
+#     ]
+# )
+# logger = logging.getLogger(__name__)
+
+# Use the new colored logger
+setup_colored_logging()
+logger = get_logger(__name__)
+
 
 def run_multiagent_trading_cycle():
     """
@@ -61,7 +67,7 @@ def run_multiagent_trading_cycle():
         }
 
         logger.info("🎯 Executing multi-agent trading pipeline...")
-        logger.info("Pipeline stages: Analyst-AI → Strategist-AI → Trader-AI → Supervisor Review → Execution")
+        logger.info("Pipeline stages: CoinGecko-AI → Analyst-AI → Strategist-AI → Trader-AI → Supervisor Review → Execution")
 
         # Execute the complete multi-agent pipeline
         pipeline_result = supervisor.run(pipeline_inputs)
@@ -92,15 +98,19 @@ def run_multiagent_trading_cycle():
                 logger.info(f"📰 Market intelligence quality: {intelligence_quality}")
             if decision_quality:
                 logger.info(f"🧠 AI decision quality: {decision_quality:.2f}")
-            
+
             # Log any warnings or errors
-            total_errors = pipeline_summary.get("total_errors", 0)
-            total_warnings = pipeline_summary.get("total_warnings", 0)
+            warnings = pipeline_result.get("execution_context", {}).get("warnings", [])
+            errors = pipeline_result.get("execution_context", {}).get("errors", [])
             
-            if total_warnings > 0:
-                logger.warning(f"⚠️  Pipeline completed with {total_warnings} warnings")
-            if total_errors > 0:
-                logger.error(f"❌ Pipeline completed with {total_errors} errors")
+            if warnings:
+                logger.warning(f"Pipeline completed with {len(warnings)} warnings:")
+                for warning in warnings:
+                    logger.warning(f"  - {warning}")
+            if errors:
+                logger.error(f"Pipeline completed with {len(errors)} errors:")
+                for error in errors:
+                    logger.error(f"  - {error}")
                 
         else:
             logger.error("❌ MULTI-AGENT TRADING CYCLE FAILED")
@@ -124,7 +134,7 @@ def run_multiagent_trading_cycle():
         logger.error("🔧 Check API credentials and network connectivity")
         
     except Exception as e:
-        logger.error(f"💥 Unexpected error in multi-agent trading cycle: {e}")
+        logger.error(f"💥 Unexpected error in multi-agent trading cycle: {e}", exc_info=True)
         logger.error("🔧 Check logs for detailed error information")
         
     finally:
@@ -160,9 +170,9 @@ def main():
     """
     Main scheduler function for the multi-agent trading bot.
     """
-    print("\n" + "🚀" * 25)
-    print("🤖 CHATGPT-KRAKEN MULTI-AGENT TRADING BOT")
-    print("🚀" * 25)
+    print("\n" + "🚀" * 35)
+    print("🤖   CHATGPT-KRAKEN MULTI-AGENT TRADING BOT   🤖")
+    print("🚀" * 35)
     
     logger.info("🤖 Multi-Agent Trading Bot Scheduler Starting")
     logger.info("=" * 60)
@@ -217,7 +227,7 @@ def main():
                         logger.info("=" * 50)
                         logger.info("✅ Manual trading cycle completed successfully!")
                     except Exception as e:
-                        logger.error(f"❌ Manual trading cycle failed: {e}")
+                        logger.error(f"❌ Manual trading cycle failed: {e}", exc_info=True)
                     logger.info("")
                     logger.info("🎯 Press [ENTER] to run again, [S] for status, [L] for equity, [P] for portfolio, [T] for trades, or [Ctrl+C] to stop")
                     logger.info("")
@@ -248,9 +258,9 @@ def main():
                                 logger.info(f"   💵 Last logged equity: ${last_equity:.2f}")
                                 logger.info(f"   📅 Last updated: {last_time}")
                             else:
-                                logger.info("   ❌ No equity data found")
+                                logger.warning("   ❌ No equity data found")
                         else:
-                            logger.info("   ❌ Equity file not found")
+                            logger.warning("   ❌ Equity file not found")
                         
                         # Show current live portfolio
                         logger.info("")
@@ -270,9 +280,9 @@ def main():
                                     if data['value'] > 0:
                                         allocation = portfolio_data['allocation_percentages'].get(asset, 0)
                                         if asset == 'USD':
-                                            logger.info(f"      • USD: ${data['value']:,.2f} ({allocation:.1f}%)")
+                                            logger.info(f"      • 💵 USD: ${data['value']:,.2f} ({allocation:.1f}%)")
                                         else:
-                                            logger.info(f"      • {asset}: {data['amount']:.6f} = ${data['value']:,.2f} @ ${data['price']:,.2f} ({allocation:.1f}%)")
+                                            logger.info(f"      • 🪙 {asset}: {data['amount']:.6f} = ${data['value']:,.2f} @ ${data['price']:,.2f} ({allocation:.1f}%)")
                             else:
                                 logger.info("   📝 No holdings found")
                                 
@@ -280,7 +290,7 @@ def main():
                             logger.error(f"   ❌ Error fetching live portfolio: {portfolio_error}")
                             
                     except Exception as e:
-                        logger.error(f"   ❌ Error reading equity: {e}")
+                        logger.error(f"   ❌ Error reading equity: {e}", exc_info=True)
                     logger.info("")
                 
                 elif user_input == "p":  # Portfolio status check
@@ -316,7 +326,7 @@ def main():
                                         if asset in portfolio_data['tradeable_assets']:
                                             logger.info(f"         └─ ✅ Tradeable to USD")
                                         else:
-                                            logger.info(f"         └─ ❌ Not tradeable to USD")
+                                            logger.warning(f"         └─ ❌ Not tradeable to USD")
                         else:
                             logger.info("   📝 Portfolio is empty")
                             
@@ -328,7 +338,7 @@ def main():
                             logger.info(f"   🥧 ALLOCATION: {cash_pct:.1f}% Cash | {crypto_pct:.1f}% Crypto")
                         
                     except Exception as e:
-                        logger.error(f"   ❌ Error fetching portfolio: {e}")
+                        logger.error(f"   ❌ Error fetching portfolio: {e}", exc_info=True)
                     logger.info("")
                     
                 elif user_input == "t":  # Recent trades check
@@ -345,11 +355,11 @@ def main():
                                 for _, trade in trades_df.tail(3).iterrows():
                                     logger.info(f"      • {trade['action'].upper()} {trade['volume']:.6f} {trade['pair']} (TxID: {trade['txid']})")
                             else:
-                                logger.info("   ❌ No trades found")
+                                logger.warning("   ❌ No trades found")
                         else:
-                            logger.info("   ❌ Trades file not found")
+                            logger.warning("   ❌ Trades file not found")
                     except Exception as e:
-                        logger.error(f"   ❌ Error reading trades: {e}")
+                        logger.error(f"   ❌ Error reading trades: {e}", exc_info=True)
                     logger.info("")
             
             time.sleep(0.5)  # Small sleep to prevent high CPU usage
@@ -358,7 +368,7 @@ def main():
         logger.info("")
         logger.info("👋 Multi-agent scheduler stopped by user")
     except Exception as e:
-        logger.error(f"💥 Scheduler error: {e}")
+        logger.error(f"💥 Scheduler error: {e}", exc_info=True)
     finally:
         logger.info("🏁 Multi-agent scheduler shutdown complete")
 

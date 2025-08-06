@@ -634,6 +634,97 @@ The enhanced multi-agent system provides significant improvements over the legac
 
 ---
 
+## 🛡️ Error Handling & Resilience (August 2025)
+
+**Objective:** Enhance system observability and ensure the pipeline can gracefully handle partial failures without crashing the entire trading cycle.
+
+**Key Enhancements:**
+
+### 1. **🎨 Enhanced Observability with Rich Logging**
+- **Colorful Terminal Output:** Implemented `rich` library for colored logging (`INFO`, `WARNING`, `ERROR`, `CRITICAL`) to make terminal output intuitive and easy to parse.
+- **Emoji-Enhanced Logs:** Added emojis (`✅`, `⚠️`, `❌`, `🔥`) to log levels for quick visual identification of message severity.
+- **Improved Readability:** Standardized log formats across all modules for a clean, professional interface.
+- **Files Modified:**
+  - `bot/logger.py`: **NEW** central logging configuration module.
+  - `scheduler_multiagent.py`: Integrated new logger and end-of-run summary.
+  - All `agents/*.py` and `bot/*.py` files updated to use the new centralized logger.
+
+### 2. **🤖 Agent Fallback System in Supervisor-AI**
+- **Resilient Execution Wrapper:** Implemented a new `_execute_with_fallback` method in `Supervisor-AI` to wrap agent calls in a `try...except` block, preventing single-agent failures from crashing the pipeline.
+- **Defined Fallback Strategies:**
+  - **`CoinGecko-AI` / `Analyst-AI` Failure:** System logs a `WARNING`, proceeds in a "degraded" state with incomplete data, and notifies the user in the end-of-run summary.
+  - **`Strategist-AI` Failure:** Treated as a `CRITICAL` error that aborts the trading portion of the cycle to prevent uninformed decisions.
+  - **`Trader-AI` Failure:** Falls back to a safe `DEFENSIVE_HOLDING` strategy (no trades) to protect capital.
+- **Degraded Mode Reporting:** The end-of-run summary now clearly indicates if any agent failed and a fallback was used, marking the run as **"✅ Completed with degraded functionality."**
+- **Files Modified:**
+  - `agents/supervisor_agent.py`: Added `_execute_with_fallback` and specific fallback logic for each agent.
+
+### 3. **📊 End-of-Run Summary**
+- **Mission Control Overview:** At the end of each run, `Supervisor-AI` presents a clean, formatted summary of any warnings or critical errors encountered during the cycle.
+- **Instant Health Check:** Provides a quick, scannable overview of the trading cycle's health, highlighting issues like failed news feeds or dust positions.
+- **Example Summary:**
+  ```
+  ⚠️ WARNINGS:
+    - CoinGecko-AI failed, proceeding with no market data
+    - Analyst-AI failed, proceeding with no news data
+  ```
+
+**Benefits:**
+- ✅ **Improved Debugging:** Rich, colored logs make it easier to spot issues and trace errors.
+- ✅ **Enhanced Resilience:** The bot can now survive partial failures and default to a safe state.
+- ✅ **Better Observability:** The end-of-run summary provides an instant health check of the trading cycle.
+- ✅ **Production-Ready:** These enhancements move the bot closer to a robust, self-healing system suitable for live deployment.
+
+---
+
+### 🐞 Critical Bug Fix: Trade Validation Logic (August 2025) - RESOLVED ✅
+- **Problem Solved:** `TradeExecutor` was failing to validate `sell` orders, incorrectly reporting "Insufficient balance" even when funds were available.
+- **Root Cause:** The logic to identify the asset being sold (e.g., `XRP` from `XXRPZUSD`) was flawed. It used simple string manipulation (`.replace('USD', '')`), which failed on complex official pair names.
+- **Solution:** Rewrote the asset extraction logic in `_validate_trade_against_holdings` to use `kraken_api.get_pair_details()`. This method reliably fetches the official `base` asset for any given pair, ensuring balance checks are always performed against the correct holding.
+- **Impact:** Sell order validation is now accurate and reliable, preventing erroneous trade rejections and improving overall trading robustness.
+- **Status:** ✅ PRODUCTION READY - Trade validation logic is now resilient to complex pair names.
+
+---
+
+### 💸 "Insufficient Funds" Error & Small Portfolio Logic (August 2025) - RESOLVED ✅
+- **Problem Solved:** The bot was failing with "EOrder:Insufficient funds" errors when trying to execute `buy` orders, even after `sell` orders should have freed up enough cash. Additionally, the AI was attempting to over-diversify the small $10 portfolio, resulting in trades too small to meet Kraken's minimum order sizes.
+- **Root Cause:**
+  1. **Execution Order:** The `TradeExecutor` validated all trades at once, failing `buy` orders because it didn't account for the incoming cash from pending `sell` orders.
+  2. **AI Strategy:** The AI's default strategy of diversification was not suitable for a micro-portfolio, leading to multiple sub-minimum trade suggestions.
+- **Comprehensive Solution:**
+  1. **Sequential Trade Execution:** Refactored `TradeExecutor.execute_trades` to process all `sell` orders first, then requery the balance to get the updated cash amount before executing `buy` orders. This ensures buys are only attempted with capital that is actually available.
+  2. **Enhanced AI Prompting:** Added a `SINGLE-POSITION MANDATE` to `prompt_template.md`. For portfolios under $50, the AI is now explicitly instructed to consolidate its investment into a single, high-conviction trade to ensure it meets minimum order sizes.
+- **Impact:** The bot can now intelligently rebalance its portfolio without running into "insufficient funds" errors, and its strategy for small portfolios is much more robust, preventing failed trades.
+- **Status:** ✅ PRODUCTION READY - The bot's trading and rebalancing logic is now significantly more reliable, especially for small portfolios.
+
+---
+
+### 🧹 Dust Position Handling (August 2025) - IMPLEMENTED ✅
+- **Problem Solved:** The AI was generating `sell` orders with `0.0%` allocation for tiny "dust" positions (e.g., $0.001 worth of an asset), creating noisy and unnecessary warnings in the logs.
+- **Root Cause:** Tiny residual balances from previous trades were being included in the AI's portfolio context.
+- **Two-Layered Solution:**
+  1. **Source Filtering:** Modified `KrakenAPI.get_comprehensive_portfolio_context` to filter out any crypto holding worth less than **$0.01** and making up less than **0.05%** of the portfolio. This prevents the AI from ever seeing dust.
+  2. **Validation Safety Net:** Enhanced `TraderAgent._validate_trade_format` to gracefully skip any trade with a `0.0%` allocation that might still get through, logging it as an `INFO`-level "no-op" instead of a `WARNING`.
+- **Files Modified:**
+  - `bot/kraken_api.py`
+  - `agents/trader_agent.py`
+- **Impact:** The trading logs are now cleaner and more focused on meaningful actions. The system is more robust, as the bot will no longer attempt to trade insignificant dust balances.
+- **Status:** ✅ PRODUCTION READY - The bot now gracefully ignores dust positions.
+
+---
+
+### 🌐 Connection Resilience with Retries (August 2025) - IMPLEMENTED ✅
+- **Problem Solved:** Temporary network issues or Kraken API glitches could cause the entire trading cycle to fail.
+- **Solution:** Implemented a robust retry mechanism in `KrakenAPI._query_api` with exponential backoff.
+- **Features:**
+  - Automatically retries failed requests up to 3 times.
+  - Waits longer between each retry (1s, 2s, 4s) to handle temporary API load.
+  - Intelligently distinguishes between temporary network/API errors (which should be retried) and critical application-level errors like "insufficient funds" (which should fail immediately).
+- **Impact:** The bot is now much more resilient to transient network problems, increasing its overall reliability and uptime.
+- **Status:** ✅ PRODUCTION READY - The bot can now gracefully handle temporary connection issues.
+
+---
+
 ## 🏦 Enhanced Portfolio Awareness (August 2025)
 
 **Objective:** Ensure the trading bot is always aware of current holdings using live Kraken API data, never making assumptions about portfolio state.

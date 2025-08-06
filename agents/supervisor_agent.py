@@ -27,7 +27,7 @@ from bot.kraken_api import KrakenAPI
 from bot.trade_executor import TradeExecutor
 from bot.performance_tracker import PerformanceTracker
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class PipelineState(Enum):
     """Enumeration of possible pipeline states."""
@@ -95,6 +95,27 @@ class SupervisorAgent(BaseAgent):
         self.logger.info(f"Supervisor-AI initialized with unified session: {session_dir}")
         self.logger.info("Complete agent team initialized with shared session directory")
     
+    def _execute_with_fallback(self, agent_fn, fallback_fn, agent_name: str, *args, **kwargs):
+        """
+        Executes an agent's function with a fallback mechanism.
+
+        Args:
+            agent_fn: The primary function to execute for the agent.
+            fallback_fn: The fallback function to execute on failure.
+            agent_name: The name of the agent for logging.
+            *args, **kwargs: Arguments to pass to the agent function.
+
+        Returns:
+            The result of either the agent function or the fallback function.
+        """
+        try:
+            return agent_fn(*args, **kwargs)
+        except Exception as e:
+            self.logger.error(f"🚨 {agent_name} failed: {e}", exc_info=True)
+            self.execution_context["errors"].append(f"{agent_name} failed: {str(e)}")
+            self.logger.warning(f"🛡️  Executing fallback for {agent_name}...")
+            return fallback_fn()
+
     def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the complete multi-agent trading pipeline.
@@ -170,10 +191,28 @@ class SupervisorAgent(BaseAgent):
         analyst_result = self._run_analyst_stage(coingecko_result, inputs)
         
         # Step 3: Strategic Prompt Construction (with CoinGecko data)
-        strategist_result = self._run_strategist_stage(analyst_result, coingecko_result, inputs)
+        strategist_result = self._execute_with_fallback(
+            agent_fn=self._run_strategist_stage,
+            fallback_fn=self._strategist_fallback,
+            agent_name="Strategist-AI",
+            analyst_result=analyst_result,
+            coingecko_result=coingecko_result,
+            inputs=inputs
+        )
         
+        # Abort if strategist failed critically
+        if strategist_result.get("status") == "critical_failure":
+            self.current_state = PipelineState.FAILED
+            return {"pipeline_summary": self._generate_pipeline_summary()}
+
         # Step 4: AI Trading Decision Generation
-        trader_result = self._run_trader_stage(strategist_result, inputs)
+        trader_result = self._execute_with_fallback(
+            agent_fn=self._run_trader_stage,
+            fallback_fn=self._trader_fallback,
+            agent_name="Trader-AI",
+            strategist_result=strategist_result,
+            inputs=inputs
+        )
         
         # Step 5: Final Review and Decision
         final_decision = self._review_trading_plan(trader_result)
@@ -224,17 +263,22 @@ class SupervisorAgent(BaseAgent):
             self.execution_context["agent_outputs"]["coingecko"] = coingecko_result
             
             if coingecko_result.get("status") == "error":
-                self.execution_context["errors"].append(f"CoinGecko-AI failed: {coingecko_result.get('error_message')}")
-                raise Exception(f"Market data gathering failed: {coingecko_result.get('error_message')}")
+                self.execution_context["warnings"].append(f"CoinGecko-AI failed, proceeding with no market data: {coingecko_result.get('error_message')}")
+                return self._coingecko_fallback()
             
             self.logger.info("✅ CoinGecko-AI completed successfully")
             return coingecko_result
             
         except Exception as e:
-            self.logger.error(f"CoinGecko stage failed: {e}")
-            self.execution_context["errors"].append(f"CoinGecko stage failure: {str(e)}")
-            raise
+            self.logger.error(f"CoinGecko stage failed: {e}", exc_info=True)
+            self.execution_context["warnings"].append(f"CoinGecko stage failed critically: {str(e)}")
+            return self._coingecko_fallback()
     
+    def _coingecko_fallback(self):
+        """Fallback for CoinGecko-AI."""
+        self.logger.warning("Executing CoinGecko-AI fallback: No market data will be available.")
+        return {"status": "fallback", "market_data": {}, "trending_data": {}, "data_quality": {"quality_score": "degraded"}}
+
     def _run_analyst_stage(self, coingecko_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the Analyst-AI stage of the pipeline.
@@ -270,16 +314,21 @@ class SupervisorAgent(BaseAgent):
             self.execution_context["agent_outputs"]["analyst"] = analyst_result
             
             if analyst_result.get("status") == "error":
-                self.execution_context["errors"].append(f"Analyst-AI failed: {analyst_result.get('error_message')}")
-                raise Exception(f"Market intelligence gathering failed: {analyst_result.get('error_message')}")
+                self.execution_context["warnings"].append(f"Analyst-AI failed, proceeding with no news data: {analyst_result.get('error_message')}")
+                return self._analyst_fallback()
             
             self.logger.info("✅ Analyst-AI completed successfully")
             return analyst_result
             
         except Exception as e:
-            self.logger.error(f"Analyst stage failed: {e}")
-            self.execution_context["errors"].append(f"Analyst stage failure: {str(e)}")
-            raise
+            self.logger.error(f"Analyst stage failed: {e}", exc_info=True)
+            self.execution_context["warnings"].append(f"Analyst stage failed critically: {str(e)}")
+            return self._analyst_fallback()
+    
+    def _analyst_fallback(self):
+        """Fallback for Analyst-AI."""
+        self.logger.warning("Executing Analyst-AI fallback: No news/market intelligence will be available.")
+        return {"status": "fallback", "research_report": {"market_summary": "Market intelligence unavailable due to agent failure."}}
     
     def _run_strategist_stage(self, analyst_result: Dict[str, Any], coingecko_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -329,9 +378,14 @@ class SupervisorAgent(BaseAgent):
             return strategist_result
             
         except Exception as e:
-            self.logger.error(f"Strategist stage failed: {e}")
+            self.logger.error(f"Strategist stage failed: {e}", exc_info=True)
             self.execution_context["errors"].append(f"Strategist stage failure: {str(e)}")
             raise
+
+    def _strategist_fallback(self):
+        """Fallback for Strategist-AI."""
+        self.logger.critical("Executing Strategist-AI fallback: Aborting trading cycle.")
+        return {"status": "critical_failure", "prompt_payload": None}
     
     def _run_trader_stage(self, strategist_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -374,9 +428,22 @@ class SupervisorAgent(BaseAgent):
             return trader_result
             
         except Exception as e:
-            self.logger.error(f"Trader stage failed: {e}")
+            self.logger.error(f"Trader stage failed: {e}", exc_info=True)
             self.execution_context["errors"].append(f"Trader stage failure: {str(e)}")
             raise
+
+    def _trader_fallback(self):
+        """Fallback for Trader-AI."""
+        self.logger.warning("Executing Trader-AI fallback: Defaulting to DEFENSIVE_HOLDING strategy.")
+        return {
+            "status": "fallback",
+            "trading_plan": {
+                "trades": [],
+                "strategy": "DEFENSIVE_HOLDING",
+                "thesis": "AI decision engine failed. Defaulting to a defensive hold strategy to preserve capital. No trades will be executed."
+            },
+            "decision_quality": {"quality_grade": "degraded"}
+        }
     
     def _review_trading_plan(self, trader_result: Dict[str, Any]) -> Dict[str, Any]:
         """

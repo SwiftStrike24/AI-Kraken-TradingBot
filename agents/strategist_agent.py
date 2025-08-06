@@ -17,7 +17,7 @@ from .base_agent import BaseAgent
 from bot.kraken_api import KrakenAPI
 from bot.prompt_engine import PromptEngine, PromptEngineError
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class StrategistAgent(BaseAgent):
     """

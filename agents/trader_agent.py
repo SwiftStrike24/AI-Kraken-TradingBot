@@ -18,7 +18,7 @@ from openai import OpenAI, APIError
 
 from .base_agent import BaseAgent
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class TraderAgent(BaseAgent):
     """
@@ -279,7 +279,7 @@ class TraderAgent(BaseAgent):
                 
                 # Skip trades with 0% allocation (dust amounts)
                 if allocation_percentage == 0.0:
-                    self.logger.warning(f"Trade {index}: Skipping trade with 0% allocation for {pair}")
+                    self.logger.info(f"Trade {index}: Skipping trade with 0.0% allocation for {pair} (no-op)")
                     return None  # Signal to skip this trade
                 
                 # Allow sell orders to exceed the max allocation to enable full position exits

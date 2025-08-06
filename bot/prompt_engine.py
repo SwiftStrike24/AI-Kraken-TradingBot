@@ -1,10 +1,11 @@
 import os
 import logging
 from typing import Optional
+from bot.logger import get_logger
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = get_logger(__name__)
 
 class PromptEngineError(Exception):
     """Custom exception for errors within the Prompt Engine."""

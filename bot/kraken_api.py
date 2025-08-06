@@ -6,8 +6,9 @@ import hmac
 import requests
 import urllib.parse
 import logging
+from bot.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class KrakenAPIError(Exception):
     """Custom exception for Kraken API errors."""
@@ -70,17 +71,23 @@ class KrakenAPI:
                 payload = response.json()
 
                 if payload.get('error'):
-                    raise KrakenAPIError(f"API Error: {payload['error']}")
+                    # Don't retry on application-level errors (e.g., insufficient funds)
+                    error_str = str(payload['error'])
+                    if "EOrder" in error_str or "EGeneral:Invalid" in error_str:
+                        raise KrakenAPIError(f"API Error: {payload['error']}")
+                    
+                    # For other errors, retry
+                    logger.warning(f"API returned errors: {payload['error']}. Retrying... ({attempt+1}/{max_retries})")
+                    time.sleep(2 ** attempt) # Exponential backoff
+                    continue
 
                 return payload.get('result', {})
 
             except requests.exceptions.RequestException as e:
-                # Need to check response text for rate limit error string from Kraken
-                response_text = response.text if 'response' in locals() else ''
-                if "EGeneral:Too many requests" in response_text and attempt < max_retries - 1:
-                    time.sleep(2 ** attempt) # Exponential backoff
-                    continue
-                raise KrakenAPIError(f"Request failed: {e}. Response: {response_text}")
+                logger.warning(f"Request failed: {e}. Retrying... ({attempt+1}/{max_retries})")
+                time.sleep(2 ** attempt) # Exponential backoff
+                continue
+
         raise KrakenAPIError(f"Failed to query API after {max_retries} retries.")
 
     def _fetch_asset_pairs(self):
@@ -317,6 +324,30 @@ class KrakenAPI:
                 for asset, data in usd_values.items():
                     allocation_percentages[asset] = (data['value'] / total_equity) * 100
             
+            # Identify and filter out dust positions from all returned data structures
+            dust_assets = []
+            if total_equity > 0: # Only filter if we have a portfolio to evaluate against
+                # Iterate over a copy of crypto_assets to avoid modification issues
+                for asset in list(crypto_assets): 
+                    if asset in usd_values:
+                        data = usd_values[asset]
+                        allocation = allocation_percentages.get(asset, 0)
+                        
+                        # Dust criteria: value < $0.01 AND allocation < 0.05%
+                        if data['value'] < 0.01 and allocation < 0.05:
+                            dust_assets.append(asset)
+
+            if dust_assets:
+                logger.info(f"Filtering out {len(dust_assets)} dust positions from AI context: {', '.join(dust_assets)}")
+                for asset in dust_assets:
+                    usd_values.pop(asset, None)
+                    balance.pop(asset, None)
+                    allocation_percentages.pop(asset, None)
+                    if asset in tradeable_assets:
+                        tradeable_assets.remove(asset)
+                    if asset in crypto_assets:
+                        crypto_assets.remove(asset)
+
             # Build formatted portfolio summary for AI prompt
             portfolio_summary = f"Current cash balance: ${total_cash:,.2f} USD.\n"
             
@@ -326,12 +357,7 @@ class KrakenAPI:
                     if asset in usd_values:
                         data = usd_values[asset]
                         allocation = allocation_percentages.get(asset, 0)
-                        # Only include positions worth at least $0.01 and > 0.05% allocation
-                        if data['value'] >= 0.01 and allocation >= 0.05:
-                            portfolio_summary += f"- {asset}: {data['amount']:.6f} (Value: ${data['value']:,.2f} @ ${data['price']:,.2f}) [{allocation:.1f}%]\n"
-                        # For debugging: log dust positions but don't include in AI context
-                        elif data['value'] > 0:
-                            logger.debug(f"Filtering out dust position: {asset} ${data['value']:,.3f} ({allocation:.2f}%)")
+                        portfolio_summary += f"- {asset}: {data['amount']:.6f} (Value: ${data['value']:,.2f} @ ${data['price']:,.2f}) [{allocation:.1f}%]\n"
             
             portfolio_summary += f"\nTotal Portfolio Value: ${total_equity:,.2f} USD"
             

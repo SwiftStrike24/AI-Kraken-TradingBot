@@ -1,9 +1,10 @@
 import logging
 from bot.kraken_api import KrakenAPI, KrakenAPIError
+from bot.logger import get_logger
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = get_logger(__name__)
 
 class TradeExecutor:
     """
@@ -93,35 +94,38 @@ class TradeExecutor:
             if action != 'sell':
                 return True, "Buy orders don't require balance validation", trade
             
-            # Extract base asset from pair (what we're selling)
-            base_asset = pair.split('/')[0] if '/' in pair else pair.replace('USD', '')
+            # Extract base asset from pair using official pair details
+            pair_details = self.kraken_api.get_pair_details(pair)
+            if not pair_details:
+                return False, f"Could not get pair details for {pair} to validate holdings", trade
             
-            # Clean asset name
-            for prefix in ['X', 'Z']:
-                if base_asset.startswith(prefix) and len(base_asset) > len(prefix):
-                    base_asset = base_asset[len(prefix):]
-                    break
+            base_asset = pair_details.get('base')
+            if not base_asset:
+                return False, f"Could not determine base asset for {pair}", trade
+
+            # Clean asset name (remove Kraken's X/Z prefixes)
+            clean_base_asset = base_asset[1:] if base_asset.startswith(('X', 'Z')) and len(base_asset) > 1 else base_asset
             
             # Get current portfolio
             portfolio_data = self.kraken_api.get_comprehensive_portfolio_context()
-            current_balance = portfolio_data['raw_balances'].get(base_asset, 0.0)
+            current_balance = portfolio_data['raw_balances'].get(clean_base_asset, 0.0)
             
             # Check for precision mismatch and adjust if necessary
             if current_balance < volume:
                 # If the difference is very small, adjust the volume to match the balance
                 if abs(current_balance - volume) / volume < 0.01: # 1% tolerance
                     adjusted_volume = current_balance
-                    logger.warning(f"Adjusting sell order for {base_asset} from {volume:.8f} to {adjusted_volume:.8f} to match available balance.")
+                    logger.warning(f"Adjusting sell order for {clean_base_asset} from {volume:.8f} to {adjusted_volume:.8f} to match available balance.")
                     adjusted_trade = trade.copy()
                     adjusted_trade['volume'] = adjusted_volume
-                    return True, f"Adjusted sell order for {base_asset} to match balance", adjusted_trade
+                    return True, f"Adjusted sell order for {clean_base_asset} to match balance", adjusted_trade
                 else:
-                    return False, f"Insufficient {base_asset} balance. Have: {current_balance:.6f}, Need: {volume:.6f}", trade
+                    return False, f"Insufficient {clean_base_asset} balance. Have: {current_balance:.6f}, Need: {volume:.6f}", trade
             
-            return True, f"Sufficient {base_asset} balance: {current_balance:.6f} >= {volume:.6f}", trade
+            return True, f"Sufficient {clean_base_asset} balance: {current_balance:.6f} >= {volume:.6f}", trade
             
         except Exception as e:
-            logger.error(f"Error validating trade against holdings: {e}")
+            logger.error(f"Error validating trade against holdings: {e}", exc_info=True)
             return False, f"Validation error: {e}", trade
     
     def _log_portfolio_impact(self, trade: dict, portfolio_data: dict):
@@ -221,13 +225,13 @@ class TradeExecutor:
             return new_trade
             
         except Exception as e:
-            logger.error(f"Error converting percentage to volume for trade {trade}: {e}")
+            logger.error(f"Error converting percentage to volume for trade {trade}: {e}", exc_info=True)
             raise
 
     def execute_trades(self, trade_plan: dict) -> list:
         """
         Executes a list of trades using a two-phase (validate, execute) process.
-        Now supports both legacy volume-based trades and new percentage-based allocation.
+        It now intelligently handles sales first to free up capital before buys.
 
         Args:
             trade_plan: A dictionary from the DecisionEngine, containing a list of trades.
@@ -238,39 +242,69 @@ class TradeExecutor:
             A list of dictionaries, each detailing the outcome of a trade.
         """
         results = []
-        trades_to_execute = trade_plan.get('trades', [])
+        all_trades = trade_plan.get('trades', [])
 
-        if not trades_to_execute:
+        if not all_trades:
             logger.info("Trade plan is empty. No trades to execute.")
             return results
-
-        # Calculate portfolio value for percentage-based trades
-        portfolio_value = self._calculate_portfolio_value()
-        logger.info(f"Current portfolio value: ${portfolio_value:.2f}")
         
-        # Get current portfolio context for validation and impact analysis
-        portfolio_data = self.kraken_api.get_comprehensive_portfolio_context()
-        logger.info(f"🏦 Portfolio Status: {len(portfolio_data['tradeable_assets'])} tradeable assets, "
-                   f"{portfolio_data['allocation_percentages'].get('USD', 0):.1f}% cash")
+        # Separate buys and sells
+        sell_trades = [t for t in all_trades if t.get('action', '').lower() == 'sell']
+        buy_trades = [t for t in all_trades if t.get('action', '').lower() == 'buy']
 
-        # --- Phase 1: Validation ---
-        logger.info("Starting Phase 1: Validating all trades...")
+        # --- Phase 1: Execute Sell Orders First ---
+        if sell_trades:
+            logger.info(f"🔥 Phase 1: Executing {len(sell_trades)} SELL order(s) to free up capital...")
+            sell_results = self._process_trades(sell_trades, 'sell')
+            results.extend(sell_results)
+        else:
+            logger.info("Phase 1: No SELL orders to execute.")
+
+        # --- Phase 2: Execute Buy Orders ---
+        if buy_trades:
+            logger.info(f"💰 Phase 2: Executing {len(buy_trades)} BUY order(s) with available capital...")
+            buy_results = self._process_trades(buy_trades, 'buy')
+            results.extend(buy_results)
+        else:
+            logger.info("Phase 2: No BUY orders to execute.")
+            
+        logger.info("✅ Trade execution cycle complete.")
+        return results
+
+    def _process_trades(self, trades_to_process: list, trade_type: str) -> list:
+        """
+        Helper function to process a list of either buy or sell trades.
+        
+        Args:
+            trades_to_process: A list of trades of the same type (buy or sell).
+            trade_type: A string, either 'buy' or 'sell'.
+            
+        Returns:
+            A list of dictionaries with the results of the processed trades.
+        """
+        results = []
+        # --- Validation Loop ---
+        logger.info(f"Validating {len(trades_to_process)} {trade_type.upper()} trades...")
         validated_trades = []
-        for trade in trades_to_execute:
+        
+        # Always get the latest portfolio value for this batch
+        portfolio_value = self._calculate_portfolio_value()
+        portfolio_data = self.kraken_api.get_comprehensive_portfolio_context()
+        logger.info(f"🏦 Portfolio Status for {trade_type.upper()}s: Total Value ${portfolio_value:,.2f}, Cash ${portfolio_data['cash_balance']:,.2f}")
+
+        for trade in trades_to_process:
             try:
                 # Check if this is a percentage-based trade or legacy volume-based trade
                 if 'allocation_percentage' in trade:
-                    # Convert percentage to volume
                     converted_trade = self._convert_percentage_to_volume(trade, portfolio_value)
                     pair = self._normalize_pair(converted_trade['pair'])
                     action = converted_trade['action'].lower()
                     volume = float(converted_trade['volume'])
                     
-                    # Log the conversion details
                     allocation_pct = trade['allocation_percentage'] * 100
                     confidence = trade.get('confidence_score', 'N/A')
                     reasoning = trade.get('reasoning', 'No reasoning provided')
-                    logger.info(f"Validating: {action.capitalize()} {allocation_pct:.1f}% allocation ({volume:.8f}) of {pair} (Confidence: {confidence}) - {reasoning}")
+                    logger.info(f"Validating: {action.capitalize()} {allocation_pct:.1f}% ({volume:.8f}) of {pair} (Confidence: {confidence}) - {reasoning}")
                     
                     # Add estimated price for impact logging
                     try:
@@ -286,7 +320,7 @@ class TradeExecutor:
                     pair = self._normalize_pair(trade['pair'])
                     action = trade['action'].lower()
                     volume = float(trade['volume'])
-                    logger.info(f"Validating: {action.capitalize()} {volume:.8f} of {pair} (Legacy volume-based trade)")
+                    logger.info(f"Validating: {action.capitalize()} {volume:.8f} of {pair} (Legacy)")
                     trade_to_validate = trade.copy()
                     trade_to_validate['pair'] = pair
                 
@@ -305,22 +339,21 @@ class TradeExecutor:
                 # LOG PORTFOLIO IMPACT
                 self._log_portfolio_impact(trade_to_validate, portfolio_data)
                 
-                # PRE-VALIDATION: Check minimum order size before calling Kraken API
+                # PRE-VALIDATION: Check minimum order size
                 pair_details = self.kraken_api.get_pair_details(pair)
                 if pair_details:
                     ordermin = float(pair_details.get('ordermin', 0))
                     if volume < ordermin:
-                        # Use original pair name in error message for consistency
                         original_pair = trade.get('pair', pair)
                         error_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {pair}"
                         user_friendly_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {original_pair}"
                         logger.warning(f"⚠️ Skipping trade: {error_msg}")
                         results.append({'status': 'volume_too_small', 'trade': trade, 'error': user_friendly_msg})
-                        continue  # Skip this trade and proceed to next
+                        continue
                     else:
                         logger.info(f"✅ Volume check passed: {volume:.8f} >= {ordermin:.8f} minimum for {pair}")
                 else:
-                    logger.warning(f"⚠️ Could not verify minimum order size for {pair} - proceeding with validation")
+                    logger.warning(f"⚠️ Could not verify minimum order size for {pair} - proceeding")
                 
                 self.kraken_api.place_order(
                     pair=pair,
@@ -329,7 +362,6 @@ class TradeExecutor:
                     validate=True
                 )
                 
-                # If validation succeeds, add the cleaned trade to our list
                 validated_trades.append({'pair': pair, 'action': action, 'volume': volume, 'original_trade': trade})
                 logger.info(f"Validation successful for {pair}.")
 
@@ -337,19 +369,20 @@ class TradeExecutor:
                 error_message = f"Validation failed for trade {trade}: {e}"
                 logger.error(error_message)
                 results.append({'status': 'validation_failed', 'trade': trade, 'error': str(e)})
-                # Continue to next trade instead of aborting entire execution
                 continue
             except (KeyError, ValueError) as e:
                 error_message = f"Invalid trade format in plan {trade}: {e}"
-                logger.error(error_message)
+                logger.error(error_message, exc_info=True)
                 results.append({'status': 'invalid_format', 'trade': trade, 'error': str(e)})
-                # Continue to next trade instead of aborting entire execution
                 continue
 
-        logger.info(f"Phase 1 Complete: {len(validated_trades)} trades validated successfully out of {len(trades_to_execute)} total trades.")
+        logger.info(f"Validation Complete: {len(validated_trades)} {trade_type.upper()} trade(s) ready for execution.")
 
-        # --- Phase 2: Execution ---
-        logger.info("Starting Phase 2: Executing all trades...")
+        # --- Execution Loop ---
+        if not validated_trades:
+            return results
+            
+        logger.info(f"Executing {len(validated_trades)} {trade_type.upper()} trade(s)...")
         for trade in validated_trades:
             try:
                 pair = trade['pair']
@@ -374,11 +407,11 @@ class TradeExecutor:
                 error_message = f"Live execution failed for trade {trade}: {e}"
                 logger.error(error_message)
                 results.append({'status': 'execution_failed', 'trade': trade, 'error': str(e)})
-                # Continue to the next trade even if one fails
+                continue
             except Exception as e:
                 error_message = f"An unexpected error occurred during execution of {trade}: {e}"
-                logger.error(error_message)
+                logger.error(error_message, exc_info=True)
                 results.append({'status': 'unexpected_error', 'trade': trade, 'error': str(e)})
 
-        logger.info("Phase 2 Complete: All trades have been processed.")
+        logger.info(f"Execution of {trade_type.upper()} trades complete.")
         return results
