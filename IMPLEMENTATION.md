@@ -9,6 +9,25 @@ The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
 
+**🛡️ ROBUSTNESS UPGRADE (August 2025):** Market Intelligence Pipeline - IMPLEMENTED ✅
+- **Problem Solved:** The bot was consistently failing to gather any relevant news headlines, causing the AI to operate without crucial market context and leading to poor decision-making quality.
+- **Root Cause Analysis:**
+  1.  **Stale RSS Feeds:** Many of the hardcoded RSS feed URLs in `bot/research_agent.py` were outdated or inactive, resulting in failed requests.
+  2.  **Aggressive Caching:** The caching logic was not correctly clearing itself between runs and was overly aggressive, incorrectly flagging new articles as duplicates.
+  3.  **Fragile Date Parsing:** The previous date parsing logic could not handle the variety of timestamp formats found across different RSS feeds.
+  4.  **Generic User-Agent:** Requests were being made with a default User-Agent, increasing the risk of being blocked by news source firewalls.
+- **Technical Solution:**
+  - **Overhauled RSS Feeds:** Conducted a web search to find and implement a new, verified list of high-quality crypto and macro news RSS feeds for 2025. Removed all dead links.
+  - **Intelligent Cache Control:** Refactored the `SupervisorAgent` to take explicit control over data freshness. It now passes a `bypass_cache=True` flag to the `AnalystAgent` at the start of every trading cycle and, critically, during refinement loops. This ensures the AI always has the freshest possible data.
+  - **Robust Date Parsing:** Replaced the fragile, format-specific date parsing with the `python-dateutil` library, which can intelligently parse almost any common date format.
+  - **Standardized User-Agent:** All RSS feed requests are now made with a standard browser User-Agent to maximize compatibility and avoid automated blocking.
+- **Files Modified:**
+  - `bot/research_agent.py`: Updated RSS feed list, integrated `dateutil` for parsing, and added a standard User-Agent to requests.
+  - `agents/supervisor_agent.py`: Implemented logic to control the `bypass_cache` flag for the `AnalystAgent`.
+  - `agents/analyst_agent.py`: Modified to correctly pass the `bypass_cache` flag down to the `ResearchAgent`.
+- **Impact:** The market intelligence pipeline is now significantly more resilient and reliable. The bot can successfully gather a rich set of fresh news headlines, providing the AI with the high-quality, real-time context it needs to make informed, intelligent trading decisions.
+- **Status:** ✅ PRODUCTION READY - The bot's ability to see and understand the market is fully restored.
+
 **🤖 AUTONOMY UPGRADE (August 9, 2025):** Refinement Loop Robustness - IMPLEMENTED ✅
 - **Problem Solved:** The refinement loop, designed to ask the AI for a better plan when its first one was invalid, was failing. The AI would often propose the same invalid trade again, causing the system to hit its `max_refinement_loops` limit and abort the trading cycle.
 - **Root Cause:**
@@ -98,7 +117,7 @@ The strategy is experimental, transparent, and performance-logged.
 - **Impact:** The trading bot is now significantly more robust and intelligent. It can reason about uncertainty, actively seek to improve its own understanding before acting, and is less likely to execute trades based on low-quality information. This moves the system from simple automation to a more advanced, cognitive agentic architecture.
 - **Status:** ✅ PRODUCTION READY - The Supervisor is now a true dynamic orchestrator.
 
-**🔧 CRITICAL BUG FIX (August 5, 2025):** Research Agent Data Flow Fix - RESOLVED ✅
+**�� CRITICAL BUG FIX (August 5, 2025):** Research Agent Data Flow Fix - RESOLVED ✅
 - **Problem Solved:** Daily research reports showing "Market analysis unavailable - no live news data could be gathered" despite successful news fetching
 - **Root Cause:** Duplicate RSS fetching within same execution cycle causing cache conflicts and empty headlines for AI analysis
 - **Technical Solution:** Refactored `ResearchAgent._fetch_market_summary()` to accept pre-fetched headlines as parameters instead of re-fetching

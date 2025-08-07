@@ -185,6 +185,9 @@ class SupervisorAgent(BaseAgent):
         """
         Execute the multi-agent pipeline as a state-driven loop, allowing for iterative refinement.
         """
+        # --- FIX: Ensure fresh data on the first run of the cycle ---
+        inputs['bypass_cache'] = True 
+        
         # Initial data gathering stages
         coingecko_result = self._run_coingecko_stage(inputs)
         analyst_result = self._run_analyst_stage(coingecko_result, inputs)
@@ -240,8 +243,8 @@ class SupervisorAgent(BaseAgent):
                 # We need to create a new input for the analyst, based on the refinement query.
                 refined_analyst_inputs = inputs.copy()
                 refined_analyst_inputs['research_focus'] = refinement_query
-                # --- OPTIMIZATION (Phase 2): Use cached news, just get new perspective ---
-                refined_analyst_inputs['bypass_cache'] = False 
+                # --- FIX: Force cache bypass during refinement to get fresh data ---
+                refined_analyst_inputs['bypass_cache'] = True 
                 
                 # Re-run the analyst with the new, focused query.
                 analyst_result = self._run_analyst_stage(coingecko_result, refined_analyst_inputs)
@@ -432,6 +435,7 @@ class SupervisorAgent(BaseAgent):
                 "priority_keywords": inputs.get("priority_keywords", []),
                 "supervisor_directives": inputs,
                 "coingecko_data": coingecko_result,  # Pass the full CoinGecko data
+                "bypass_cache": inputs.get("bypass_cache", False), # Pass the flag through
                 "coingecko_execution_context": {
                     "timestamp": coingecko_result.get("timestamp"),
                     "quality": coingecko_result.get("data_quality", {}),

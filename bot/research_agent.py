@@ -54,15 +54,13 @@ class ResearchAgent:
             "https://cryptoslate.com/feed/",
             "https://decrypt.co/feed",
             "https://bitcoinist.com/feed/",
-            "https://cryptonews.com/news/feed/",
             "https://u.today/rss",
             "https://ambcrypto.com/feed/",
             "https://cryptopotato.com/feed/",
             "https://beincrypto.com/feed/",
-            # Additional verified sources
             "https://blockchain.news/rss",
-            # Removed "https://cryptorank.io/news/feed" due to consistent parsing failures
-            # Consider adding more reliable sources in future updates
+            "https://bravenewcoin.com/news/rss",
+            "https://forkast.news/feed/",
         ]
         
         # Financial/macro RSS feeds (VERIFIED WORKING as of August 2025 - Full Political Spectrum for Balanced Analysis)
@@ -72,21 +70,14 @@ class ResearchAgent:
             "https://feeds.marketwatch.com/marketwatch/realtimeheadlines/",
             
             # RIGHT-LEANING SOURCES - CONFIRMED WORKING
-            "https://www.nationalreview.com/feed/",  # Conservative - 20 entries
-            "https://reason.com/latest/feed/",       # Libertarian - 48 entries
-            "https://www.aei.org/feed/",             # Conservative think tank - 24 entries
-            "https://www.manhattan-institute.org/rss.xml",  # Conservative policy - 10 entries
-            "https://mises.org/feed",                # Austrian economics/libertarian - 100 entries
+            "https://www.nationalreview.com/feed/",
+            "https://reason.com/latest/feed/",
+            "https://www.aei.org/feed/",
             
             # LEFT-LEANING SOURCES - CONFIRMED WORKING
-            "https://feeds.npr.org/1001/rss.xml",    # NPR News - 10 entries
-            "https://feeds.npr.org/1003/rss.xml",    # NPR All Things Considered - 10 entries
-            "https://feeds.npr.org/1002/rss.xml",    # NPR Planet Money (economics) - 10 entries
-            "https://feeds.npr.org/1017/rss.xml",    # NPR Hourly News Summary - 10 entries
-            "https://feeds.washingtonpost.com/rss/business", # WaPo Business - 3 entries
-            
-            # ADDITIONAL LEFT-LEANING SOURCES - CONFIRMED WORKING
-            "https://www.motherjones.com/rss/"       # Progressive magazine - 10 entries
+            "https://feeds.npr.org/1001/rss.xml",    # NPR News
+            "https://feeds.npr.org/1004/rss.xml",    # NPR Business
+            "https://www.motherjones.com/feed/",       # Progressive magazine
         ]
         
         # Keywords for filtering relevant crypto content (enhanced for August 2025)
@@ -188,7 +179,7 @@ class ResearchAgent:
             # On error, clear cache to be safe
             self.processed_urls = set()
     
-    def _is_recent_article(self, date_input, hours_threshold: int = 48) -> bool:
+    def _is_recent_article(self, date_input: any, hours_threshold: int = 48) -> bool:
         """
         Check if an article was published recently.
         
@@ -213,27 +204,18 @@ class ResearchAgent:
                 except (TypeError, ValueError):
                     pass
             
-            # Handle string dates (for backward compatibility with tests)
+            # Handle string dates
             if pub_date is None and isinstance(date_input, str):
-                # Common RSS date formats
-                date_formats = [
-                    '%a, %d %b %Y %H:%M:%S %Z',     # RFC 2822
-                    '%a, %d %b %Y %H:%M:%S %z',     # RFC 2822 with numeric timezone
-                    '%Y-%m-%dT%H:%M:%S%z',          # ISO 8601
-                    '%Y-%m-%dT%H:%M:%SZ',           # ISO 8601 UTC
-                    '%Y-%m-%d %H:%M:%S',            # Simple format
-                    '%a, %d %b %Y %H:%M:%S GMT',    # GMT format
-                ]
-                
-                for date_format in date_formats:
-                    try:
-                        pub_date = datetime.strptime(date_input.strip(), date_format)
-                        # Make timezone-naive for comparison
-                        if pub_date.tzinfo is not None:
-                            pub_date = pub_date.replace(tzinfo=None)
-                        break
-                    except ValueError:
-                        continue
+                from dateutil import parser
+                try:
+                    # Use dateutil.parser for robust, flexible date parsing
+                    pub_date = parser.parse(date_input)
+                    # Make timezone-naive for comparison
+                    if pub_date.tzinfo is not None:
+                        pub_date = pub_date.astimezone(None).replace(tzinfo=None)
+                except (ValueError, TypeError):
+                    logger.debug(f"Could not parse date with dateutil, defaulting to recent: {date_input}")
+                    return True
             
             if pub_date is None:
                 logger.debug(f"Could not parse date, defaulting to recent: {date_input}")
@@ -274,13 +256,24 @@ class ResearchAgent:
         headlines = []
         successful_feeds = 0
         
+        # Use a standard browser User-Agent to avoid being blocked
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
         for feed_url in feed_urls:
             try:
                 source_name = urlparse(feed_url).netloc.replace('www.', '')
                 logger.info(f"Fetching {source_category} from {source_name}")
                 
+                # Use a session object for potential connection pooling
+                with requests.Session() as s:
+                    s.headers.update(headers)
+                    response = s.get(feed_url, timeout=15)
+                    response.raise_for_status()
+                
                 # Use feedparser for robust RSS/Atom parsing
-                feed = feedparser.parse(feed_url)
+                feed = feedparser.parse(response.content)
                 
                 # Check if feed was parsed successfully
                 if hasattr(feed, 'bozo') and feed.bozo:
@@ -313,20 +306,20 @@ class ResearchAgent:
                         # Skip if already processed (unless cache is bypassed)
                         if not bypass_cache and link and link in self.processed_urls:
                             skipped_reasons['duplicate'] += 1
-                            logger.debug(f"Skipped '{title[:50]}...': Already processed")
+                            logger.debug(f"Skipped (duplicate): '{title[:50]}...'")
                             continue
                         
                         # Check if article is recent using feedparser's parsed dates
                         pub_time = getattr(entry, 'published_parsed', None) or getattr(entry, 'updated_parsed', None)
                         if pub_time and not self._is_recent_article(pub_time):
                             skipped_reasons['old'] += 1
-                            logger.debug(f"Skipped '{title[:50]}...': Too old")
+                            logger.debug(f"Skipped (too old): '{title[:50]}...'")
                             continue
                         
                         # Filter by keywords
                         if keywords and not self._contains_keywords(title, keywords):
                             skipped_reasons['no_keywords'] += 1
-                            logger.debug(f"Skipped '{title[:50]}...': No matching keywords")
+                            logger.debug(f"Skipped (no keywords): '{title[:50]}...'")
                             continue
                         
                         # Format headline
@@ -358,8 +351,11 @@ class ResearchAgent:
                 # Rate limiting - be respectful
                 time.sleep(1)
                 
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 logger.error(f"Error fetching RSS from {feed_url}: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"General error processing feed {feed_url}: {e}")
                 continue
         
         logger.info(f"Successfully fetched from {successful_feeds}/{len(feed_urls)} feeds")
