@@ -40,6 +40,8 @@ class PipelineState(Enum):
     EXECUTING_TRADES = "executing_trades"
     COMPLETED = "completed"
     FAILED = "failed"
+    # Add new state for iterative refinement
+    REFINING_STRATEGY = "refining_strategy"
 
 class SupervisorAgent(BaseAgent):
     """
@@ -53,13 +55,14 @@ class SupervisorAgent(BaseAgent):
     5. Maintains comprehensive audit trails
     """
     
-    def __init__(self, kraken_api: KrakenAPI, logs_dir: str = "logs"):
+    def __init__(self, kraken_api: KrakenAPI, logs_dir: str = "logs", max_refinement_loops: int = 2):
         """
         Initialize the Supervisor Agent.
         
         Args:
             kraken_api: Kraken API instance for trading operations
             logs_dir: Directory for saving agent transcripts
+            max_refinement_loops: The maximum number of times the supervisor can loop back to refine a strategy.
         """
         # Create unified session directory for all agents in this trading cycle
         now = datetime.now()
@@ -91,6 +94,8 @@ class SupervisorAgent(BaseAgent):
         # Pipeline state tracking
         self.current_state = PipelineState.IDLE
         self.execution_context = {}
+        self.max_refinement_loops = max_refinement_loops
+        self.refinement_attempts = 0
         
         self.logger.info(f"Supervisor-AI initialized with unified session: {session_dir}")
         self.logger.info("Complete agent team initialized with shared session directory")
@@ -139,12 +144,14 @@ class SupervisorAgent(BaseAgent):
             "agent_outputs": {},
             "pipeline_state": PipelineState.IDLE.value,
             "errors": [],
-            "warnings": []
+            "warnings": [],
+            "refinement_history": [] # To track refinement loops
         }
+        self.refinement_attempts = 0 # Reset attempts for each new execution
         
         try:
             # Execute the complete pipeline
-            pipeline_result = self._execute_pipeline(inputs)
+            pipeline_result = self._execute_pipeline_loop(inputs)
             
             end_time = datetime.now()
             execution_duration = (end_time - start_time).total_seconds()
@@ -174,58 +181,109 @@ class SupervisorAgent(BaseAgent):
                 "final_state": self.current_state.value
             }
     
-    def _execute_pipeline(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_pipeline_loop(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute the complete multi-agent pipeline with state management.
-        
-        Args:
-            inputs: Initial inputs for the pipeline
-            
-        Returns:
-            Complete pipeline execution results
+        Execute the multi-agent pipeline as a state-driven loop, allowing for iterative refinement.
         """
-        # Step 1: CoinGecko Market Data Gathering
+        # Initial data gathering stages
         coingecko_result = self._run_coingecko_stage(inputs)
-        
-        # Step 2: Market Intelligence Gathering (with CoinGecko data)
         analyst_result = self._run_analyst_stage(coingecko_result, inputs)
         
-        # Step 3: Strategic Prompt Construction (with CoinGecko data)
-        strategist_result = self._execute_with_fallback(
-            agent_fn=self._run_strategist_stage,
-            fallback_fn=self._strategist_fallback,
-            agent_name="Strategist-AI",
-            analyst_result=analyst_result,
-            coingecko_result=coingecko_result,
-            inputs=inputs
-        )
-        
-        # Abort if strategist failed critically
-        if strategist_result.get("status") == "critical_failure":
-            self.current_state = PipelineState.FAILED
-            return {"pipeline_summary": self._generate_pipeline_summary()}
+        # --- NEW (Phase 4): Preserve the initial, complete analyst report ---
+        initial_analyst_result = analyst_result
 
-        # Step 4: AI Trading Decision Generation
-        trader_result = self._execute_with_fallback(
-            agent_fn=self._run_trader_stage,
-            fallback_fn=self._trader_fallback,
-            agent_name="Trader-AI",
-            strategist_result=strategist_result,
-            inputs=inputs
-        )
-        
-        # Step 5: Final Review and Decision
-        final_decision = self._review_trading_plan(trader_result)
-        
-        # Step 6: Trade Execution (if approved)
+        while self.refinement_attempts < self.max_refinement_loops:
+            self.current_state = PipelineState.RUNNING_STRATEGIST
+            strategist_result = self._execute_with_fallback(
+                agent_fn=self._run_strategist_stage,
+                fallback_fn=self._strategist_fallback,
+                agent_name="Strategist-AI",
+                analyst_result=analyst_result,
+                coingecko_result=coingecko_result,
+                inputs=inputs
+            )
+            if strategist_result.get("status") == "critical_failure":
+                self.current_state = PipelineState.FAILED
+                return {"pipeline_summary": self._generate_pipeline_summary()}
+
+            trader_result = self._execute_with_fallback(
+                agent_fn=self._run_trader_stage,
+                fallback_fn=self._trader_fallback,
+                agent_name="Trader-AI",
+                strategist_result=strategist_result,
+                inputs=inputs
+            )
+
+            final_decision = self._review_trading_plan(trader_result)
+
+            # --- QUALITY GATE & DYNAMIC REFINEMENT LOOP ---
+            if self._should_refine_strategy(final_decision):
+                self.refinement_attempts += 1
+                self.current_state = PipelineState.REFINING_STRATEGY
+                # --- ENHANCED LOGGING (Phase 1) ---
+                rejection_reason = final_decision['approval_decision'].get('approval_reason', 'No reason specified')
+                self.logger.warning(f"🤔 Strategy rejected. Attempting refinement loop {self.refinement_attempts}/{self.max_refinement_loops}...")
+                self.logger.warning(f"   REASON: {rejection_reason}")
+                
+                refinement_log = {
+                    "attempt": self.refinement_attempts,
+                    "reason": rejection_reason,
+                    "original_thesis": trader_result.get("trading_plan", {}).get("thesis")
+                }
+
+                # Delegate new task to Analyst for more data
+                self.logger.info("Delegating new task to Analyst-AI for more targeted research...")
+                refinement_query = self._create_refinement_query(trader_result, final_decision.get("validation_result", {}).get("validation_issues", []))
+                # --- ENHANCED LOGGING (Phase 1) ---
+                self.logger.info(f"   REFINEMENT QUERY: {refinement_query}")
+                
+                # We need to create a new input for the analyst, based on the refinement query.
+                refined_analyst_inputs = inputs.copy()
+                refined_analyst_inputs['research_focus'] = refinement_query
+                # --- OPTIMIZATION (Phase 2): Use cached news, just get new perspective ---
+                refined_analyst_inputs['bypass_cache'] = False 
+                
+                # Re-run the analyst with the new, focused query.
+                analyst_result = self._run_analyst_stage(coingecko_result, refined_analyst_inputs)
+                
+                refinement_log["new_analyst_focus"] = refinement_query
+                refinement_log["new_analyst_result"] = analyst_result.get("research_report", {}).get("market_context")
+                self.execution_context["refinement_history"].append(refinement_log)
+                
+                # --- NEW (Phase 2): Add the specific failure reason as context for the next attempt ---
+                inputs['refinement_context'] = f"The previous plan was rejected for the following reason: '{rejection_reason}'. You MUST address this issue in your new plan."
+                
+                continue # Loop back to the strategist with the new, refined analyst data
+
+            # If the plan is approved, break the loop and proceed to execution.
+            break
+
+        # --- NEW: CIRCUIT BREAKER / FALLBACK STRATEGY (Phase 2) ---
+        if self.refinement_attempts >= self.max_refinement_loops and self._should_refine_strategy(final_decision):
+            self.logger.error(f"❌ Maximum refinement loops ({self.max_refinement_loops}) reached. No valid plan could be generated.")
+            self.logger.warning("🛡️  FALLBACK: Defaulting to a DEFENSIVE_HOLDING strategy to ensure safe cycle completion.")
+            
+            # Create a safe, 'hold' fallback plan
+            last_rejection_reason = final_decision['approval_decision'].get('approval_reason', 'Unknown validation issue')
+            fallback_thesis = f"The AI failed to generate a valid trading plan after {self.max_refinement_loops} attempts. The last rejected plan had the following issue(s): '{last_rejection_reason}'. As a safety measure, the system is defaulting to a defensive hold strategy to preserve capital. No trades will be executed. The system will try again in the next cycle."
+            
+            final_decision['trading_plan'] = {
+                "trades": [],
+                "strategy": "DEFENSIVE_HOLDING",
+                "thesis": fallback_thesis
+            }
+            # Approve the fallback plan for execution (which does nothing but logs the new thesis)
+            final_decision['approval_decision']['approved'] = True
+            final_decision['approval_decision']['approval_reason'] = "Fallback defensive hold strategy activated after refinement failure."
+
+
+        # --- EXECUTION STAGE ---
         execution_result = self._execute_trades_if_approved(final_decision)
-        
-        # Step 7: Performance Tracking
         tracking_result = self._update_performance_tracking(execution_result)
-        
+
         return {
             "coingecko_result": coingecko_result,
-            "analyst_result": analyst_result,
+            "analyst_result": initial_analyst_result, # Return the original, full report
             "strategist_result": strategist_result,
             "trader_result": trader_result,
             "final_decision": final_decision,
@@ -233,7 +291,81 @@ class SupervisorAgent(BaseAgent):
             "tracking_result": tracking_result,
             "pipeline_summary": self._generate_pipeline_summary()
         }
-    
+
+    def _should_refine_strategy(self, final_decision: Dict[str, Any]) -> bool:
+        """
+        Determines if the trading plan is good enough or needs another refinement loop.
+        """
+        approval_decision = final_decision.get("approval_decision", {})
+        validation_result = final_decision.get("validation_result", {})
+
+        # If it's already approved, no refinement needed.
+        if approval_decision.get("approved", False):
+            return False
+        
+        # If there are hard validation issues, refinement won't help, so don't loop.
+        # --- PHASE 1 ENHANCEMENT: Allow refinement for certain validation issues ---
+        validation_result = final_decision.get("validation_result", {})
+        if not validation_result.get("validation_passed", False):
+            # Check if the failure is something refineable, like a minimum volume issue.
+            issues = validation_result.get("validation_issues", [])
+            is_refineable = any("Volume below minimum" in issue for issue in issues)
+            if is_refineable:
+                return True # This is a key fix: explicitly trigger refinement for this error type
+            if not is_refineable:
+                return False # Don't loop for non-refineable issues like invalid format
+
+        # Refine if the quality score is too low or risk is too high without justification.
+        if "Quality score too low" in approval_decision.get("approval_reason", ""):
+            return True
+        if "High risk with insufficient quality" in approval_decision.get("approval_reason", ""):
+            return True
+
+        return False
+
+    def _create_refinement_query(self, trader_result: Dict[str, Any], validation_issues: List[str] = None) -> str:
+        """
+        Creates a targeted research query for the Analyst-AI based on a rejected trade plan.
+        """
+        trading_plan = trader_result.get("trading_plan", {})
+        trades = trading_plan.get("trades", [])
+        
+        # If the rejection was due to a specific validation issue, address it.
+        if validation_issues:
+            # Focus on the first issue for simplicity
+            issue = validation_issues[0]
+            if "Volume below minimum" in issue:
+                # E.g., "Trade 1: Volume below minimum. Calculated 1.33186999, requires 2.00000000 for XXRPZUSD"
+                parts = issue.split(' ')
+                try:
+                    # Correctly parse the components from the error string
+                    asset_name = parts[-1]
+                    # Find the indices for calculated and required volumes
+                    calculated_idx = parts.index("Calculated") + 1
+                    requires_idx = parts.index("requires") + 1
+                    
+                    calculated_vol = parts[calculated_idx].replace(',', '')
+                    required_vol = parts[requires_idx].replace(',', '')
+                    
+                    # Get portfolio value to add more context
+                    portfolio_value = self._get_portfolio_value()
+
+                    return f"The previous trading plan for {asset_name} was rejected. The calculated trade volume of {calculated_vol} was below the required minimum of {required_vol}. For our small portfolio of ${portfolio_value:.2f}, this is a common issue. Propose a new plan with a DIFFERENT asset or a significantly HIGHER allocation to an existing one to meet the minimums. Do not propose a trade for {asset_name} again in this refinement loop unless you dramatically increase its allocation to meet the minimum."
+                except (IndexError, ValueError) as e:
+                     self.logger.error(f"Error parsing validation issue string for refinement query: '{issue}'. Error: {e}")
+                     return f"The previous plan was rejected due to a trade being too small. Propose a new plan with a different asset or a higher allocation to meet minimum order sizes."
+
+        if not trades:
+            return "General market analysis, with a focus on identifying any high-conviction opportunities missed."
+
+        # Focus on the assets in the rejected plan
+        assets = [t.get('pair', '').replace('USD', '').replace('ZUSD', '').replace('XBT','BTC') for t in trades]
+        unique_assets = list(set(assets))
+
+        query = f"The previous trading plan was rejected for low confidence. Conduct a deep dive on the following assets: {', '.join(unique_assets)}. Focus on finding recent (last 24 hours) news, on-chain data, or sentiment shifts that either strongly support or strongly contradict a trade. Ignore general market news and provide only specific, actionable intelligence on these assets."
+        return query
+
+
     def _run_coingecko_stage(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the CoinGecko-AI stage of the pipeline.
@@ -481,6 +613,44 @@ class SupervisorAgent(BaseAgent):
         self.logger.info(f"✅ Trading plan review completed - Decision: {approval_decision['approved']}")
         return review_result
     
+    def _normalize_pair(self, pair: str) -> Optional[str]:
+        """
+        Cleans and standardizes a trading pair string to find the official Kraken pair name.
+        
+        Args:
+            pair: The trading pair string from the AI's plan.
+            
+        Returns:
+            A standardized, valid Kraken pair name or None if not found.
+        """
+        # Clean the input
+        clean_pair = pair.upper().replace('/', '').replace('-', '')
+        
+        # Handle specific asset mappings like BTC -> XBT
+        if clean_pair.startswith('BTC'):
+            clean_pair = 'XBT' + clean_pair[3:]
+
+        # For pairs ending in USD, try to find the exact Kraken pair name
+        if clean_pair.endswith('USD'):
+            base_asset = clean_pair[:-3] # Remove 'USD'
+            
+            # Check for direct mapping (e.g., 'ETH' -> 'XETHZUSD')
+            # Note: asset_to_usd_pair_map uses clean asset names (without X/Z prefixes)
+            if base_asset in self.kraken_api.asset_to_usd_pair_map:
+                return self.kraken_api.asset_to_usd_pair_map[base_asset]
+            
+            # Fallback: check for prefixed versions (e.g., 'XETH' -> 'XETHZUSD')
+            for prefix in ['X', 'Z']:
+                if base_asset.startswith(prefix) and base_asset[1:] in self.kraken_api.asset_to_usd_pair_map:
+                    return self.kraken_api.asset_to_usd_pair_map[base_asset[1:]]
+
+        # If it's already a valid pair name, return it
+        if pair in self.kraken_api.asset_pairs:
+            return pair
+            
+        self.logger.warning(f"Could not normalize or find pair: {pair}")
+        return None
+
     def _validate_trading_plan(self, trading_plan: Dict[str, Any], quality_metrics: Dict[str, Any]) -> Dict[str, Any]:
         """
         Perform comprehensive validation of the trading plan.
@@ -517,6 +687,10 @@ class SupervisorAgent(BaseAgent):
         if len(trades) > 5:
             validation_warnings.append(f"Unusually high number of trades: {len(trades)}")
         
+        # --- PHASE 1 ENHANCEMENT: Pre-Execution Volume Validation ---
+        # Get portfolio value once for all calculations
+        portfolio_value = self._get_portfolio_value()
+
         # Check 5: Confidence-based validation for new percentage trades
         for i, trade in enumerate(trades):
             if 'confidence_score' in trade:
@@ -530,7 +704,7 @@ class SupervisorAgent(BaseAgent):
                 # Portfolio-size-aware allocation validation (matching Trader-AI logic)
                 try:
                     # Get current portfolio value for validation
-                    portfolio_value = self._get_portfolio_value()
+                    # portfolio_value = self._get_portfolio_value() # Moved up
                     max_allocation = 0.95 if portfolio_value < 50 else 0.4
                     
                     # Allow sell orders to exceed the max allocation for rebalancing
@@ -557,7 +731,44 @@ class SupervisorAgent(BaseAgent):
                 if confidence < 0.3:
                     validation_warnings.append(f"Trade {i+1}: Very low confidence score ({confidence:.2f})")
         
-        # Check 6: Thesis quality
+                # Check 6: Pre-execution volume validation
+                try:
+                    normalized_pair = self._normalize_pair(trade.get('pair', ''))
+                    if not normalized_pair:
+                        validation_issues.append(f"Trade {i+1}: Invalid or unknown pair '{trade.get('pair')}'")
+                        continue
+
+                    pair_details = self.kraken_api.get_pair_details(normalized_pair)
+                    if not pair_details:
+                        validation_issues.append(f"Trade {i+1}: Could not fetch trading rules for pair '{normalized_pair}'")
+                        continue
+                    
+                    min_volume = float(pair_details.get('ordermin', 0))
+                    
+                    # Calculate expected volume from allocation
+                    if trade.get('action') == 'sell':
+                        # For sells, the volume is based on the existing holding's value
+                        base_asset_clean = pair_details.get('base', '')
+                        if base_asset_clean.startswith(('X', 'Z')) and len(base_asset_clean) > 1:
+                            base_asset_clean = base_asset_clean[1:]
+
+                        portfolio_context = self.kraken_api.get_comprehensive_portfolio_context()
+                        holding_amount = portfolio_context['raw_balances'].get(base_asset_clean, 0.0)
+                        calculated_volume = holding_amount * allocation
+                    else: # buy
+                        prices = self.kraken_api.get_ticker_prices([normalized_pair])
+                        current_price = prices[normalized_pair]['price']
+                        usd_amount = portfolio_value * allocation
+                        calculated_volume = usd_amount / current_price if current_price > 0 else 0
+
+                    if calculated_volume < min_volume:
+                        validation_issues.append(f"Trade {i+1}: Volume below minimum. Calculated {calculated_volume:.8f}, requires {min_volume:.8f} for {trade.get('pair')}")
+
+                except Exception as e:
+                    validation_warnings.append(f"Trade {i+1}: Could not perform volume pre-validation: {e}")
+
+
+        # Check 7: Thesis quality
         thesis_quality = quality_metrics.get("thesis_quality", "unknown")
         if thesis_quality == "brief":
             validation_warnings.append("Brief thesis may indicate insufficient reasoning")

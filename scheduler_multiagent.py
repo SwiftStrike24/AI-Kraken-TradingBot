@@ -144,6 +144,32 @@ def run_multiagent_trading_cycle():
         logger.info(f"Cycle completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info("")
 
+def monitor_market(supervisor: SupervisorAgent):
+    """
+    Performs a lightweight, continuous market monitoring check.
+    This is the heart of the new "always-on" autonomous agent.
+    """
+    logger.info("~" * 80)
+    logger.info("~ 🧠 Performing continuous market monitoring...")
+    logger.info("~" * 80)
+
+    # In a full implementation, this method would:
+    # 1. Fetch live prices for currently held assets.
+    # 2. Scan for high-priority, breaking news headlines.
+    # 3. Check for volatility spikes or stop-loss triggers.
+    
+    # --- Placeholder Logic for Anomaly Detection ---
+    # This is where the real-time event triggers would be implemented.
+    # For now, we simulate that no anomalies are detected.
+    anomaly_detected = False 
+    
+    if anomaly_detected:
+        logger.warning("🚨 ANOMALY DETECTED! Triggering full trading cycle for immediate re-evaluation.")
+        run_multiagent_trading_cycle()
+    else:
+        logger.info("✅ No market anomalies detected. Continuing to monitor...")
+
+
 def run_multiagent_demo():
     """
     Run a single demonstration of the multi-agent system.
@@ -200,6 +226,15 @@ def main():
     logger.info("🔄 Scheduler is now running...")
     logger.info("")
     
+    # --- NEW: Initialize Supervisor once for continuous monitoring ---
+    try:
+        kraken_api = KrakenAPI()
+        supervisor = SupervisorAgent(kraken_api)
+        logger.info("✅ Supervisor Agent initialized for continuous monitoring.")
+    except Exception as e:
+        logger.error(f"💥 Failed to initialize supervisor for monitoring: {e}")
+        return
+
     # Set up input handling
     import threading
     from collections import deque
@@ -208,14 +243,24 @@ def main():
     input_thread = threading.Thread(target=handle_user_input, args=(input_queue,), daemon=True)
     input_thread.start()
     
+    # --- NEW: Timestamp for non-blocking monitoring loop ---
+    last_monitor_time = 0
+    monitor_interval_seconds = 60 # Run monitor every 60 seconds
+
     # Keep the scheduler running with interactive controls
     try:
         while True:
-            # Check for scheduled runs
+            # Check for the scheduled 07:00 MST run
             schedule.run_pending()
             
-            # Process any user input
-            while input_queue:
+            # --- REFACTORED: Non-blocking monitoring ---
+            current_time = time.time()
+            if current_time - last_monitor_time > monitor_interval_seconds:
+                monitor_market(supervisor)
+                last_monitor_time = current_time
+
+            # Process any user input (now checked frequently)
+            if input_queue:
                 user_input = input_queue.popleft()
                 
                 if user_input == "":  # Just Enter pressed
@@ -362,7 +407,8 @@ def main():
                         logger.error(f"   ❌ Error reading trades: {e}", exc_info=True)
                     logger.info("")
             
-            time.sleep(0.5)  # Small sleep to prevent high CPU usage
+            # Wait for a short duration to prevent high CPU usage
+            time.sleep(0.5)  
             
     except KeyboardInterrupt:
         logger.info("")

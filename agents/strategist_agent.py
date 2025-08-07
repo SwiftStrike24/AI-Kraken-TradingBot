@@ -10,8 +10,10 @@ This replaces the monolithic prompt_engine.py with a more cognitive, transparent
 
 import os
 import logging
-from typing import Dict, Any
-from datetime import datetime
+from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
+
+import pandas as pd
 
 from .base_agent import BaseAgent
 from bot.kraken_api import KrakenAPI
@@ -54,6 +56,8 @@ class StrategistAgent(BaseAgent):
         # Define paths for historical data
         self.thesis_log_path = os.path.join(logs_dir, "thesis_log.md")
         self.equity_log_path = os.path.join(logs_dir, "equity.csv")
+        self.trades_log_path = os.path.join(logs_dir, "trades.csv")
+        self.rejected_trades_log_path = os.path.join(logs_dir, "rejected_trades.csv")
     
     def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -80,11 +84,20 @@ class StrategistAgent(BaseAgent):
             # Gather historical performance context
             performance_context = self._gather_performance_context()
             
+            # (NEW) Analyze the performance of the last trade cycle
+            performance_context['last_cycle_analysis'] = self._analyze_last_trade_cycle()
+
+            # (NEW) Gather feedback on previously rejected trades
+            rejected_trades_context = self._gather_rejected_trades_context()
+
             # Gather thesis history
             thesis_context = self._gather_thesis_context()
             
             # Gather trading rules from Kraken
             trading_rules = self._gather_trading_rules()
+            
+            # --- NEW (Phase 2): Get refinement context if it exists ---
+            refinement_context = inputs.get('refinement_context', None)
             
             # Construct the optimized prompt using the advanced prompt engine
             prompt_payload = self._construct_prompt_payload(
@@ -95,7 +108,9 @@ class StrategistAgent(BaseAgent):
                 performance_context, 
                 thesis_context,
                 trading_rules,
-                supervisor_directives
+                supervisor_directives,
+                rejected_trades_context, # Pass new context
+                refinement_context # Pass refinement context
             )
             
             self.logger.info("Strategic prompt construction completed successfully")
@@ -168,6 +183,125 @@ class StrategistAgent(BaseAgent):
                 "raw_portfolio_data": {}
             }
     
+    def _analyze_last_trade_cycle(self) -> Dict[str, Any]:
+        """
+        Analyzes the profitability of the trades executed since the last thesis was logged.
+        This creates the core of the performance feedback loop.
+
+        Returns:
+            A dictionary containing the analysis summary.
+        """
+        try:
+            if not os.path.exists(self.trades_log_path) or not os.path.exists(self.equity_log_path):
+                return {"status": "no_data", "summary": "Log files not found for performance analysis."}
+
+            trades_df = pd.read_csv(self.trades_log_path)
+            equity_df = pd.read_csv(self.equity_log_path, names=['timestamp', 'total_equity_usd'])
+
+            # --- BUG FIX: Definitive Timestamp Handling ---
+            # Convert all timestamps to timezone-aware UTC.
+            # The `utc=True` parameter correctly handles both timezone-aware strings (like in trades.csv)
+            # and naive strings (like in equity.csv), converting everything to a consistent UTC format.
+            trades_df['timestamp'] = pd.to_datetime(trades_df['timestamp'], errors='coerce', utc=True)
+            equity_df['timestamp'] = pd.to_datetime(equity_df['timestamp'], errors='coerce', utc=True)
+
+            # Find the timestamp of the last thesis
+            last_thesis_time = self._get_last_thesis_timestamp()
+            if last_thesis_time is None:
+                return {"status": "no_thesis", "summary": "No previous thesis to analyze."}
+
+            # Filter trades and equity data since the last thesis
+            recent_trades = trades_df[trades_df['timestamp'] > last_thesis_time]
+            relevant_equity = equity_df[equity_df['timestamp'] > last_thesis_time]
+
+            if recent_trades.empty:
+                return {"status": "no_trades", "summary": "No trades were executed in the last cycle to analyze."}
+
+            # Calculate PnL for the cycle
+            if not relevant_equity.empty:
+                start_equity = equity_df[equity_df['timestamp'] <= last_thesis_time].iloc[-1]['total_equity_usd']
+                end_equity = relevant_equity.iloc[-1]['total_equity_usd']
+                pnl_usd = end_equity - start_equity
+                pnl_percent = (pnl_usd / start_equity) * 100 if start_equity != 0 else 0
+                summary = f"The last trade cycle resulted in a PnL of ${pnl_usd:,.2f} ({pnl_percent:+.2f}%)."
+            else:
+                pnl_usd = 0
+                pnl_percent = 0
+                summary = "Could not calculate PnL for the last cycle due to missing equity data."
+
+            return {
+                "status": "analyzed",
+                "summary": summary,
+                "pnl_usd": pnl_usd,
+                "pnl_percent": pnl_percent,
+                "trade_count": len(recent_trades)
+            }
+
+        except FileNotFoundError:
+            return {"status": "no_data", "summary": "Log files not found for performance analysis."}
+        except Exception as e:
+            self.logger.error(f"Failed to analyze last trade cycle: {e}")
+            return {"status": "error", "summary": f"An error occurred during performance analysis: {e}"}
+
+    def _gather_rejected_trades_context(self) -> str:
+        """
+        Reads the rejected_trades.csv log and creates a summary for the AI.
+        This forms a feedback loop to teach the AI about invalid trade plans.
+        """
+        try:
+            if not os.path.exists(self.rejected_trades_log_path):
+                return "No rejected trades from the previous cycle to review."
+
+            rejected_df = pd.read_csv(self.rejected_trades_log_path)
+            if rejected_df.empty:
+                return "No rejected trades from the previous cycle to review."
+
+            # Get rejections from the last 24 hours
+            rejected_df['timestamp'] = pd.to_datetime(rejected_df['timestamp'], errors='coerce', utc=True)
+            last_24_hours = datetime.now(pd.Timestamp.utcnow().tz) - timedelta(hours=24)
+            recent_rejections = rejected_df[rejected_df['timestamp'] > last_24_hours]
+
+            if recent_rejections.empty:
+                return "No rejected trades from the previous cycle to review."
+
+            summary_parts = ["The following trades were proposed but REJECTED by the validation system. Do NOT make these same mistakes again:"]
+            for _, row in recent_rejections.iterrows():
+                reason = row.get('rejection_reason', 'No reason specified')
+                pair = row.get('requested_pair', 'N/A')
+                allocation = row.get('allocation_percentage', 'N/A')
+                summary_parts.append(f"- Trade for {pair} at {allocation:.1f}% allocation failed because: '{reason}'.")
+            
+            summary_parts.append("\nRevise your strategy to ensure all proposed trades are valid according to the provided TRADING_RULES.")
+            return "\n".join(summary_parts)
+
+        except Exception as e:
+            self.logger.error(f"Failed to gather rejected trades context: {e}")
+            return "Could not analyze rejected trades due to an error."
+
+    def _get_last_thesis_timestamp(self) -> Optional[datetime]:
+        """Helper to get the timestamp of the last thesis entry."""
+        if not os.path.exists(self.thesis_log_path):
+            return None
+        with open(self.thesis_log_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        theses = content.split('---')
+        if len(theses) < 2: # Need at least one full entry
+            return None
+            
+        # The second to last entry is the most recent complete one
+        last_thesis_block = theses[-2] 
+        timestamp_line = last_thesis_block.strip().split('\n')[0]
+        
+        try:
+            # E.g., "## Thesis for 2025-H2 03:25:42 UTC"
+            timestamp_str = timestamp_line.replace("## Thesis for ", "").replace(" UTC", "")
+            # Convert to timezone-aware UTC datetime for consistent comparison
+            return pd.to_datetime(timestamp_str, utc=True)
+        except (ValueError, IndexError):
+            return None
+
+
     def _gather_performance_context(self) -> Dict[str, Any]:
         """
         Gather historical performance data and trends.
@@ -185,7 +319,6 @@ class StrategistAgent(BaseAgent):
                 }
             
             # Read the equity log (CSV has no headers: timestamp, total_equity_usd)
-            import pandas as pd
             equity_df = pd.read_csv(self.equity_log_path, names=['timestamp', 'total_equity_usd'])
             
             if len(equity_df) < 2:
@@ -359,7 +492,8 @@ class StrategistAgent(BaseAgent):
     def _construct_prompt_payload(self, research_report: Dict[str, Any], coingecko_data: Dict[str, Any],
                                 trending_data: Dict[str, Any], portfolio_context: Dict[str, Any], 
                                 performance_context: Dict[str, Any], thesis_context: Dict[str, Any],
-                                trading_rules: Dict[str, Any], supervisor_directives: Dict[str, Any]) -> Dict[str, Any]:
+                                trading_rules: Dict[str, Any], supervisor_directives: Dict[str, Any],
+                                rejected_trades_context: str, refinement_context: Optional[str] = None) -> Dict[str, Any]:
         """
         Construct the final prompt payload using the advanced prompt engine.
         
@@ -372,6 +506,8 @@ class StrategistAgent(BaseAgent):
             thesis_context: Previous strategic thesis
             trading_rules: Trading rules and constraints from Kraken
             supervisor_directives: Any special directives from the Supervisor-AI
+            rejected_trades_context: Feedback on previously rejected trades
+            refinement_context: Specific feedback for the current refinement loop
             
         Returns:
             Complete prompt payload ready for AI execution
@@ -392,7 +528,10 @@ class StrategistAgent(BaseAgent):
                 research_report=research_text,
                 last_thesis=thesis_context.get('last_thesis', ''),
                 coingecko_data=coingecko_text,
-                trading_rules=trading_rules # Pass formatted trading rules to the prompt engine
+                trading_rules=trading_rules, # Pass formatted trading rules to the prompt engine
+                performance_review=performance_context.get('last_cycle_analysis', {}).get('summary', 'No analysis available.'),
+                rejected_trades_review=rejected_trades_context,
+                refinement_context=refinement_context
             )
             
             return {

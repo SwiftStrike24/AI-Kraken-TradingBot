@@ -62,10 +62,23 @@ class AnalystAgent(BaseAgent):
         research_focus = inputs.get('research_focus', 'general_market_analysis')
         priority_keywords = inputs.get('priority_keywords', [])
         coingecko_data = inputs.get('coingecko_data', None)
+        bypass_cache = inputs.get('bypass_cache', False) # New flag for refinement loops
         
         try:
+            # --- DYNAMIC KEYWORD OVERRIDE ---
+            # If the research focus is a specific, targeted query from the supervisor,
+            # use it to override the default keyword list for this run.
+            is_dynamic_query = "deep dive on" in research_focus.lower() or "focus on finding" in research_focus.lower() or "propose a new plan" in research_focus.lower()
+            
+            if is_dynamic_query:
+                self.logger.info(f"🎯 Dynamic research focus detected: {research_focus}")
+                # We can extract keywords from the focus string, or use the whole string for a smart search.
+                # For now, let's keep it simple and just log that we've received a dynamic query.
+                # In a more advanced implementation, we could parse asset names and fetch topic-specific news.
+                pass # The existing generate_daily_report will still run, but this logic can be expanded.
+
             # Generate the comprehensive research report with CoinGecko data
-            raw_report = self.research_engine.generate_daily_report(coingecko_data)
+            raw_report = self.research_engine.generate_daily_report(coingecko_data, custom_query=research_focus if is_dynamic_query else None, bypass_cache=bypass_cache)
             
             # Process and structure the report
             structured_report = self._structure_report(raw_report, research_focus, priority_keywords)

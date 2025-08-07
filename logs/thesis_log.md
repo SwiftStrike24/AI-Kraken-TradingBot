@@ -316,3 +316,75 @@ Given the current bearish market sentiment and the constraints of a small portfo
 
 ---
 
+## Thesis for 2025-08-06 03:25:42 UTC
+
+Given the current bearish market sentiment and oversold conditions in XRP, a mean reversion strategy is appropriate. XRP's decline suggests further downside risk, prompting a reallocation to Cardano, which is testing critical support levels and may benefit from recent positive developments. This strategy aims to capture potential rebounds in ADA while mitigating risk from XRP's volatility, aligning with the objective of maximizing alpha in a challenging market environment.
+
+---
+
+## Thesis for 2025-08-06 03:52:14 UTC
+
+Given the current bearish market sentiment and ADA's critical support test, an altcoin rotation strategy is appropriate. XRP's recent partnership with BDACS and its support in the Korean market present a compelling opportunity for potential rebound, despite its recent price decline. By reallocating from ADA to XRP, the strategy aims to capitalize on XRP's potential upside while managing downside risk in a volatile market environment. This approach aligns with the objective of maximizing alpha against BTC and ETH benchmarks by leveraging specific altcoin catalysts.
+
+---
+
+## Thesis for 2025-08-06 03:55:58 UTC
+
+Given the current bearish market sentiment and XRP's recent underperformance, an altcoin rotation strategy is appropriate. By selling the entire XRP position, we can reallocate capital into Solana, which has shown signs of potential recovery due to significant whale activity and a positive price outlook. This strategy aims to capitalize on Solana's relative strength and potential for a rebound, aligning with the goal of maximizing alpha in a challenging market environment.
+
+---
+
+## Thesis for 2025-08-06 04:14:00 UTC
+
+Given the current bearish market sentiment and Solana's recent underperformance, an altcoin rotation strategy is appropriate. By reallocating from Solana to XRP and Bitcoin, the portfolio aims to capitalize on XRP's strategic developments and Bitcoin's high volatility, which may offer short-term trading opportunities. This approach seeks to optimize for alpha generation by leveraging XRP's potential rebound and Bitcoin's market activity, while managing risk through diversification into assets with strong catalysts.
+
+---
+
+## Thesis for 2025-08-06 04:25:45 UTC
+
+Given the current bearish market sentiment and significant downward pressure on XRP, a mean reversion strategy is appropriate. XRP's volume spikes suggest further declines, warranting a sell-off to prevent losses. Meanwhile, Cardano's critical support level presents a potential rebound opportunity, making it a suitable buy candidate. This strategy aims to capitalize on oversold conditions and potential price recovery, optimizing for alpha generation in a volatile market environment.
+
+---
+
+## Thesis for 2025-08-06 04:31:47 UTC
+
+Given the current bearish market sentiment and significant sell-offs in major cryptocurrencies, an altcoin rotation strategy is appropriate. XRP's recent underperformance and the overall negative sentiment suggest reallocating capital to Solana, which has potential catalysts for future growth. Solana's recent technological advancements, despite its price decline, present a strategic entry point. This approach aims to capitalize on Solana's potential upside while managing risk by exiting a declining position in XRP.
+
+---
+
+## Thesis for 2025-08-06 04:39:38 UTC
+
+Given the overall bearish market tone and the lack of strong directional movement, a mean reversion strategy is appropriate. By selling XRP, which has experienced a significant decline, and reallocating to SUI, which has a smaller decline and is within the minimum order size constraints, the portfolio is positioned to capitalize on potential rebounds. This approach aligns with the strategy of targeting oversold assets likely to return to historical averages, optimizing for potential alpha generation in a challenging market environment.
+
+---
+
+## Thesis for 2025-08-07 01:33:18 UTC
+
+Given the current market conditions, Ethereum is showing strong momentum with a 3.43% increase in the last 24 hours, supported by increased transaction volumes and institutional interest. This aligns with a momentum trading strategy, which seeks to capitalize on assets with strong directional movement. By reallocating the entire portfolio from XRP to Ethereum, we aim to maximize potential alpha generation in a bullish market environment, while adhering to the constraints of minimum order sizes and portfolio rebalancing rules.
+
+---
+
+## Thesis for 2025-08-07 01:49:24 UTC
+
+Given the current cautiously bullish market sentiment and Solana's strong momentum due to the launch of its Seeker Mobile, a momentum trading strategy is appropriate. Solana's recent price increase and positive news catalysts suggest potential for further gains. By reallocating from XRP to Solana, the portfolio aims to capitalize on Solana's upward trajectory, maximizing potential alpha generation while adhering to the constraints of a small portfolio. This approach aligns with the market's current bullish tone and Solana's promising fundamentals.
+
+---
+
+## Thesis for 2025-08-07 01:56:26 UTC
+
+Given the current bullish market sentiment and Ethereum's strong upward momentum, a momentum trading strategy is appropriate. Ethereum's price increase of 3.1% in the last 24 hours suggests a potential breakout, making it a high-conviction buy. The decision to sell XRP is driven by the potential volatility from the upcoming escrow unlock, which could negatively impact its price. By reallocating the entire portfolio to Ethereum, we aim to capitalize on its strong performance and potential for further gains, aligning with the strategy to maximize alpha in a trending market.
+
+---
+
+## Thesis for 2025-08-07 02:06:17 UTC
+
+Given the current market conditions, an altcoin rotation strategy is optimal. XRP faces regulatory uncertainties and mixed sentiment, prompting a full divestment. Solana, however, benefits from technological advancements and a bullish market outlook, making it a strong candidate for reinvestment. Allocating 95% of the portfolio to Solana maximizes potential alpha while adhering to portfolio constraints and minimizing cash holdings, aligning with the small portfolio mandate.
+
+---
+
+## Thesis for 2025-08-07 02:15:23 UTC
+
+Given the cautiously bullish market sentiment and XRP's current upward momentum, a momentum trading strategy is appropriate. XRP's resilience amidst potential volatility from the escrow unlock presents a high-conviction opportunity. Allocating 95% of the portfolio to XRP maximizes potential alpha generation while adhering to the constraints of a small portfolio. This approach leverages XRP's current market dynamics to capitalize on short-term price movements, aligning with the strategy's objective of capturing gains from strong directional trends.
+
+---
+

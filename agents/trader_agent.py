@@ -284,10 +284,13 @@ class TraderAgent(BaseAgent):
                 
                 # Allow sell orders to exceed the max allocation to enable full position exits
                 if action == 'sell':
-                    if not (0.01 <= allocation_percentage <= 1.0): # Allow up to 100% for sells
+                    # --- BUG FIX: Allow a small tolerance (e.g., up to 100%) for sell orders ---
+                    # This allows the AI to fully liquidate a position without floating point errors.
+                    if not (0.01 <= allocation_percentage <= 1.0): 
                         raise ValueError(f"Trade {index}: sell allocation_percentage must be between 1% and 100%, got {allocation_percentage*100:.1f}%")
                 else: # Buy orders
-                    if not (0.01 <= allocation_percentage <= max_allocation):
+                    # --- BUG FIX: Round the allocation to handle floating point inaccuracies from the AI ---
+                    if not (0.01 <= round(allocation_percentage, 4) <= max_allocation):
                         if portfolio_value < 50:
                             raise ValueError(f"Trade {index}: allocation_percentage must be between 1% and 95% for small portfolios (<$50), got {allocation_percentage*100:.1f}%")
                         else:

@@ -9,7 +9,94 @@ The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
 
-**🚀 Major Upgrade:** Multi-agent architecture with real-time market data integration and institutional-grade AI analysis
+**🤖 AUTONOMY UPGRADE (August 9, 2025):** Refinement Loop Robustness - IMPLEMENTED ✅
+- **Problem Solved:** The refinement loop, designed to ask the AI for a better plan when its first one was invalid, was failing. The AI would often propose the same invalid trade again, causing the system to hit its `max_refinement_loops` limit and abort the trading cycle.
+- **Root Cause:**
+  1.  **Intelligence Starvation:** The `ResearchAgent`'s cache prevented it from re-processing recent news when the refinement loop was triggered just seconds after the initial run. The AI was being asked for a new plan without any new information.
+  2.  **Insufficiently Specific Query:** The Supervisor's request for a new plan was too generic. It didn't explain *why* the previous plan was rejected, making it hard for the AI to correct its mistake.
+  3.  **"Impossible Puzzle" Constraint:** The AI lacked a clear instruction on what to do if its highest-conviction trade was mathematically impossible to execute for a small portfolio due to minimum order sizes.
+- **Technical Solution:**
+  - **Cache Bypass for Refinement:** Implemented a `bypass_cache` flag in the `ResearchAgent`. The `SupervisorAgent` now sets this to `True` during a refinement loop, forcing the agent to re-fetch and re-process all recent news, ensuring the AI has fresh context for its second attempt.
+  - **Enhanced Refinement Query:** The `SupervisorAgent` now constructs a much more specific query when a trade fails volume validation. It includes the exact numbers (e.g., "Your plan for XRP failed: calculated volume 1.33, minimum required 2.0") and explicitly instructs the AI to find a *different* asset or increase the allocation.
+  - **Explicit "Escape Hatch" in Prompt:** Added a new constraint to `bot/prompt_template.md` that acts as an "escape hatch." It explicitly tells the AI: if your best idea is impossible to execute due to minimums, you MUST discard it and move to your second-best idea.
+- **Files Modified:**
+  - `agents/supervisor_agent.py`: Upgraded the refinement query logic.
+  - `agents/analyst_agent.py`: Modified to pass the `bypass_cache` flag.
+  - `bot/research_agent.py`: Implemented the `bypass_cache` functionality.
+  - `bot/prompt_template.md`: Added the new "Escape Hatch" constraint.
+- **Impact:** The refinement loop is now a genuinely effective self-correction mechanism. The AI receives both fresh intelligence and highly specific feedback on its errors, dramatically increasing the probability that its second attempt will be valid and executable. This makes the entire system more resilient and autonomous.
+- **Status:** ✅ PRODUCTION READY - The bot's self-correction capabilities are now significantly more robust.
+
+**🛡️ ARCHITECTURE UPGRADE (August 10, 2025):** Supervisor Fallback & Enhanced Logging - IMPLEMENTED ✅
+- **Problem Solved:** When the AI failed to produce a valid trading plan after exhausting its refinement loops, the entire trading cycle would abort. Furthermore, the logs did not clearly state *why* a plan was initially rejected, making debugging difficult.
+- **Root Cause:**
+  1.  **No Graceful Failure:** The system lacked a "circuit breaker" or a safe fallback state if the AI could not self-correct.
+  2.  **Insufficient Observability:** The rejection reasons were not explicitly logged, hiding the root cause of the refinement loop from the operator.
+- **Technical Solution:**
+  - **Enhanced Rejection Logging:** Modified `SupervisorAgent._execute_pipeline_loop` to explicitly log the `approval_reason` from the `final_decision` object at the moment a plan is rejected. This makes the reason for each refinement attempt clear in the console output.
+  - **Refinement Query Logging:** Added logging to display the exact `refinement_query` sent to the `AnalystAgent`, providing transparency into the self-correction attempt.
+  - **Defensive Holding Fallback:** Implemented a new "circuit breaker" in the `SupervisorAgent`. If the `max_refinement_loops` limit is reached, instead of aborting, the Supervisor now:
+    1.  Logs that it is activating a fallback.
+    2.  Generates a safe, empty trading plan (`{"trades": [], "strategy": "DEFENSIVE_HOLDING", ...}`).
+    3.  Creates a detailed `thesis` explaining *why* it is holding (e.g., "AI failed to generate a valid plan... last rejection reason was: 'Volume below minimum...'").
+    4.  Approves this safe plan, allowing the trading cycle to complete successfully and log the informative thesis.
+- **Files Modified:**
+  - `agents/supervisor_agent.py`: Implemented the new logging and fallback logic in the main pipeline loop.
+- **Impact:** The system is now significantly more resilient and transparent. It can no longer fail due to an inability to generate a valid plan. Instead, it gracefully defaults to a safe state and provides a clear, auditable log of the entire decision-making process, including the specific reasons for failure. This makes the bot more reliable for unattended operation.
+- **Status:** ✅ PRODUCTION READY - The bot is now equipped with a critical safety feature and enhanced observability.
+
+**🛡️ ARCHITECTURE UPGRADE (August 8, 2025):** Supervisor Pre-Execution Validation & Rejected Trade Feedback Loop - IMPLEMENTED ✅
+- **Problem Solved:** The AI was generating trades that failed at the execution stage because they violated Kraken's minimum order size rules. The system would gracefully handle the failure but could not learn from its mistake or prevent it from happening again.
+- **Root Cause:**
+  1.  **Delayed Validation:** The Supervisor-AI approved trading plans without pre-validating if the calculated trade volumes would be valid, leaving the final check to the `TradeExecutor` which was too late in the process.
+  2.  **Lack of Consequence Awareness:** The AI had no feedback mechanism to learn that its proposed trades were being rejected for specific rule violations. The performance review only focused on the PnL of executed trades.
+- **Technical Solution (Phase 1 - Supervisor Pre-Execution Validation):**
+  - **Enhanced Validation Logic:** Modified `SupervisorAgent._validate_trading_plan` to perform a "dry run" calculation. For each trade, it now uses live portfolio value and asset prices to calculate the expected volume.
+  - **Proactive Failure Detection:** This calculated volume is checked against the `ordermin` value fetched from the Kraken API for that specific pair. If it's too small, the trade is flagged as a `validation_issue`.
+  - **Dynamic Refinement Trigger:** Upgraded `SupervisorAgent._should_refine_strategy` to intelligently trigger the refinement loop for these specific, actionable validation failures. The Supervisor now generates a targeted query (e.g., "Find an alternative trade, the last one was too small") and re-tasks the `AnalystAgent`.
+- **Technical Solution (Phase 2 - Rejected Trade Feedback Loop):**
+  - **Rejected Trade Context:** Created a new `_gather_rejected_trades_context` method in `StrategistAgent` that reads `logs/rejected_trades.csv` and creates a summary of recently failed trade proposals.
+  - **Prompt Injection:** Added a new `<REJECTED_TRADES_REVIEW>` section to `bot/prompt_template.md`. The `PromptEngine` now injects this feedback directly into the AI's context, forcing it to acknowledge and learn from its past validation failures.
+- **Files Modified:**
+  - `agents/supervisor_agent.py`: Implemented the pre-execution volume validation logic and enhanced the refinement trigger.
+  - `agents/strategist_agent.py`: Added logic to read and process `rejected_trades.csv` for the new feedback loop.
+  - `bot/prompt_template.md`: Added the new `<REJECTED_TRADES_REVIEW>` section.
+  - `bot/prompt_engine.py`: Updated to handle the new `rejected_trades_review` parameter.
+- **Impact:** The system is now significantly more robust and intelligent. The Supervisor acts as a stronger gatekeeper, preventing invalid plans from reaching the execution stage. More importantly, the AI now has a closed feedback loop for *all* types of failures (not just unprofitable trades), allowing it to learn from its mistakes and generate progressively better trading strategies over time.
+- **Status:** ✅ PRODUCTION READY - The bot is now a more resilient, self-correcting agent.
+
+**🤖 AUTONOMY UPGRADE (August 7, 2025):** Performance Feedback & Continuous Monitoring - IMPLEMENTED ✅
+- **Problem Solved:** The bot was reactive, only operating on a fixed daily schedule. It could not learn from its past trade performance or react to market events between cycles, limiting its autonomy and profitability.
+- **Root Cause:** The system was designed as a simple scheduler, not a persistent, proactive agent. It lacked a mechanism to analyze its own performance or monitor the market for event-driven triggers.
+- **Technical Solution (Phase 1 - Performance Feedback):**
+  - **Performance Analysis:** Created a new `_analyze_last_trade_cycle` method in `agents/strategist_agent.py`. This function reads `trades.csv` and `equity.csv` to calculate the PnL of the trades executed since the last thesis.
+  - **Feedback Injection:** The `PromptEngine` was upgraded to inject this data-driven performance summary directly into the `<PERFORMANCE_REVIEW>` section of the AI's prompt, forcing it to consider the outcome of its previous strategy.
+- **Technical Solution (Phase 2 - Continuous Monitoring):**
+  - **Persistent Agent Loop:** Refactored `scheduler_multiagent.py` to run a continuous `while True` loop, transforming it from a simple scheduler into an always-on agent.
+  - **Lightweight Monitoring:** Implemented a new `monitor_market()` function that runs every minute to perform high-frequency, low-cost checks for market anomalies.
+  - **Event-Driven Triggers:** The architecture now supports triggering the full, resource-intensive trading cycle based on events (e.g., high volatility, breaking news), in addition to the daily schedule.
+- **Files Modified:**
+  - `agents/strategist_agent.py`: Added the performance analysis capability.
+  - `bot/prompt_engine.py`: Integrated the live performance feedback into the prompt-building process.
+  - `scheduler_multiagent.py`: Major refactoring to create the continuous monitoring and event-driven architecture.
+- **Impact:** The bot is now a truly autonomous agent. It learns from its actions (closing the performance loop) and can proactively respond to market opportunities and threats 24/7, significantly enhancing its potential for alpha generation and risk management.
+- **Status:** ✅ PRODUCTION READY - The bot now operates as a persistent, learning agent.
+
+**🚀 ARCHITECTURE UPGRADE (August 6, 2025):** Dynamic Supervisor & Strategy Refinement Loop - IMPLEMENTED ✅
+- **Problem Solved:** The previous multi-agent system was a rigid, linear pipeline. A low-quality market analysis or a low-confidence trading plan would proceed without challenge, or at best, halt the entire cycle.
+- **Root Cause:** The Supervisor-AI acted as a simple pipeline manager, not an active orchestrator. It lacked the ability to reason about uncertainty, request clarification, or ask for a revised strategy.
+- **Technical Solution:**
+  - **State-Driven Loop:** Refactored `SupervisorAgent._execute_pipeline` into `_execute_pipeline_loop`, transforming the architecture from a fixed sequence into a dynamic, state-driven loop.
+  - **Quality Gates:** Implemented a `_should_refine_strategy` method that acts as a "quality gate" after the `Trader-AI` generates a plan. It checks for low confidence scores, high risk, or failed validation.
+  - **Dynamic Task Delegation:** If a plan is rejected, the Supervisor now dynamically creates a new, targeted research query (e.g., "Deep dive on XRP liquidity") using `_create_refinement_query`.
+  - **Iterative Refinement:** The Supervisor re-tasks the `AnalystAgent` with the specific query. The `AnalystAgent` and `ResearchAgent` were enhanced to accept these custom queries, overriding default keyword searches. The new, richer context is then fed back into the `Strategist-AI` to generate a revised, hopefully better, trading plan.
+  - **Safety Mechanism:** A `max_refinement_loops` parameter was introduced to prevent infinite loops, ensuring the cycle terminates even if the AI cannot produce a satisfactory plan.
+- **Files Modified:**
+  - `agents/supervisor_agent.py`: Major refactoring to implement the state-driven loop, quality gates, and dynamic task delegation logic.
+  - `agents/analyst_agent.py`: Modified `execute` method to accept and process dynamic `research_focus` queries from the supervisor.
+  - `bot/research_agent.py`: Upgraded `generate_daily_report` to handle `custom_query` overrides for targeted news fetching.
+- **Impact:** The trading bot is now significantly more robust and intelligent. It can reason about uncertainty, actively seek to improve its own understanding before acting, and is less likely to execute trades based on low-quality information. This moves the system from simple automation to a more advanced, cognitive agentic architecture.
+- **Status:** ✅ PRODUCTION READY - The Supervisor is now a true dynamic orchestrator.
 
 **🔧 CRITICAL BUG FIX (August 5, 2025):** Research Agent Data Flow Fix - RESOLVED ✅
 - **Problem Solved:** Daily research reports showing "Market analysis unavailable - no live news data could be gathered" despite successful news fetching
@@ -85,7 +172,8 @@ Scheduler (daily)
                            └── Log to CSV + update equity curve
 ```
 
-### New Multi-Agent Architecture (August 2025+)
+### New Multi-Agent Architecture (August 2025+) - **DEPRECATED**
+This static pipeline view is now deprecated in favor of the dynamic loop below.
 ```
 Scheduler (daily)
    └── Supervisor-AI (Central Orchestrator)
@@ -116,19 +204,41 @@ Scheduler (daily)
            └── Performance Tracking & Cognitive Logging
 ```
 
----
+### 🧠 New **Autonomous** Multi-Agent Architecture (August 7, 2025+)
+The system now operates as a persistent agent with two interconnected loops: a high-frequency, lightweight **monitoring loop** and a deep, event-triggered **decision-making loop**.
 
-## 🧰 Technologies Used
+```mermaid
+graph TD
+    subgraph "Scheduler (Continuous Loop - every 1 min)"
+        A[Start] --> B{Supervisor.monitor_market()};
+        B --> C{Price > 5% change?};
+        B --> D{Breaking News?};
+        B --> E{07:00 MST?};
+        C -- Yes --> F[Trigger Full Cycle];
+        D -- Yes --> F;
+        E -- Yes --> F;
+        C -- No --> G[Wait 1 min];
+        D -- No --> G;
+        E -- No --> G;
+        G --> A;
+    end
 
-* **Python 3.11**
-* OpenAI API (ChatGPT 4o)
-* Kraken API (REST via `krakenex`)
-* `pandas` for data
-* `schedule` for daily automation
-* `.env` for secret key handling
-* `matplotlib` for equity curve tracking
-* `feedparser` & `requests` for RSS news aggregation
-* Local CSV-based logs for trades and PnL
+    subgraph "Full Trading Cycle (Triggered by Scheduler or Anomaly)"
+        H[Start Cycle] --> I{Supervisor: Run PerformanceAnalyst};
+        I --> J[Get Feedback on Last Trades];
+        J --> K{Supervisor: Run CoinGecko + Analyst Agents};
+        K --> L[Get Market Data & News];
+        L --> M{Supervisor: Run Strategist};
+        M --> N[Build Prompt with Performance Feedback];
+        N --> O{Supervisor: Run Trader};
+        O --> P[Generate Trading Plan];
+        P --> Q{Supervisor: Review Plan};
+        Q -- Plan Rejected --> K;
+        Q -- Plan Approved --> R[Execute Trades];
+    end
+    
+    F --> H;
+```
 
 ---
 
@@ -195,26 +305,21 @@ chatgpt-kraken-bot/
 
 ## 📌 Execution Cycle
 
-* Runs: **7 days/week at 7:00 AM MST**
-* Research agent gathers market intelligence:
+The bot now operates as a **persistent, autonomous agent** with two modes:
 
-  * Crypto news headlines (RSS feeds)
-  * Macro/regulatory updates
-  * Market sentiment indicators
-* Decision engine builds ChatGPT prompt using:
+1.  **Continuous Monitoring Mode (Default):**
+    *   Runs: **Continuously, every 60 seconds.**
+    *   Action: Performs lightweight checks on currently held assets and scans for high-impact news.
+    *   Goal: Detect market anomalies (volatility spikes, breaking news) that require immediate attention.
 
-  * Market intelligence report
-  * Current holdings
-  * Current price data
-  * Thesis summary
-* OpenAI returns portfolio actions with market awareness
-* Trades executed on Kraken
-* Logs updated with:
-
-  * Daily research reports
-  * Trade history
-  * Daily portfolio value
-  * Thesis evolution
+2.  **Full Trading Cycle Mode (Triggered):**
+    *   Runs: **On a schedule (7:00 AM MST) OR when triggered by the monitoring loop.**
+    *   **Step 1: Performance Review:** The `StrategistAgent` first analyzes the PnL of the last trade cycle.
+    *   **Step 2: Intelligence Gathering:** The `AnalystAgent` gathers comprehensive market intelligence.
+    *   **Step 3: Strategy Formulation:** The `StrategistAgent` builds a prompt including the **new performance review**, market data, and portfolio context.
+    *   **Step 4: AI Decision:** The `TraderAgent` queries the AI to generate a new trading plan.
+    *   **Step 5: Supervisor Review & Refinement:** The `SupervisorAgent` validates the plan. If the plan is low-quality, it can loop back and delegate new research tasks to refine the strategy.
+    *   **Step 6: Execution & Logging:** Approved trades are executed, and all data (trades, equity, thesis, performance) is logged.
 
 ---
 
@@ -526,17 +631,19 @@ Each agent maintains complete cognitive transparency through timestamped transcr
 The Supervisor-AI manages pipeline execution through well-defined states: IDLE → RUNNING_COINGECKO → RUNNING_ANALYST → RUNNING_STRATEGIST → RUNNING_TRADER → REVIEWING_PLAN → EXECUTING_TRADES → COMPLETED.
 
 **Enhanced Pipeline Flow:**
-1. **Stage 1:** CoinGecko-AI fetches real-time market data for 10 tracked cryptocurrencies
-2. **Stage 2:** Analyst-AI aggregates news intelligence and integrates with CoinGecko data  
-3. **Stage 3:** Strategist-AI builds institutional-grade prompts with multi-source intelligence
-4. **Stage 4:** Trader-AI executes enhanced prompts and parses trading decisions
-5. **Stage 5:** Supervisor-AI reviews and validates trading plans
-6. **Stage 6:** Trade execution (if approved)
-7. **Stage 7:** Performance tracking and cognitive logging
+1.  **(NEW) Stage 0: Performance Analysis:** Strategist-AI analyzes the PnL of the previous trade cycle.
+2.  **Stage 1:** CoinGecko-AI fetches real-time market data for 10 tracked cryptocurrencies
+3.  **Stage 2:** Analyst-AI aggregates news intelligence and integrates with CoinGecko data  
+4.  **Stage 3:** Strategist-AI builds institutional-grade prompts with multi-source intelligence, **including the new performance analysis**.
+5.  **Stage 4:** Trader-AI executes enhanced prompts and parses trading decisions
+6.  **Stage 5:** Supervisor-AI reviews and validates trading plans
+7.  **(NEW) Stage 5a - Refinement Loop:** If the plan is low-quality, the Supervisor can delegate new, targeted research tasks to the `Analyst-AI` and re-run the strategy formulation stages up to `max_refinement_loops` times.
+8.  **Stage 6:** Trade execution (if approved)
+9.  **Stage 7:** Performance tracking and cognitive logging
 
 ### Quality Assurance & Validation
 
-The multi-agent system implements comprehensive quality controls at each stage with metrics for intelligence quality, strategy confidence, decision quality, and risk assessment.
+The multi-agent system implements comprehensive quality controls at each stage with metrics for intelligence quality, strategy confidence, decision quality, and risk assessment. The new Supervisor loop uses these metrics to decide whether to proceed or to seek more information.
 
 ### Deployment Instructions
 

@@ -258,7 +258,7 @@ class ResearchAgent:
         return any(keyword.lower() in text_lower for keyword in keywords)
     
     def _fetch_from_rss(self, feed_urls: List[str], keywords: List[str], 
-                       source_category: str) -> List[str]:
+                       source_category: str, bypass_cache: bool = False) -> List[str]:
         """
         Fetch and filter articles from RSS feeds using feedparser for robust parsing.
         
@@ -266,6 +266,7 @@ class ResearchAgent:
             feed_urls: List of RSS feed URLs
             keywords: Keywords to filter content
             source_category: Category name for logging
+            bypass_cache: If True, re-processes all recent articles, ignoring the URL cache.
             
         Returns:
             List of formatted headline strings
@@ -309,8 +310,8 @@ class ResearchAgent:
                         # Extract link
                         link = getattr(entry, 'link', '').strip()
                         
-                        # Skip if already processed
-                        if link and link in self.processed_urls:
+                        # Skip if already processed (unless cache is bypassed)
+                        if not bypass_cache and link and link in self.processed_urls:
                             skipped_reasons['duplicate'] += 1
                             logger.debug(f"Skipped '{title[:50]}...': Already processed")
                             continue
@@ -375,22 +376,6 @@ class ResearchAgent:
         
         return headlines
     
-    def _fetch_crypto_news(self) -> List[str]:
-        """Fetch crypto-specific news headlines."""
-        return self._fetch_from_rss(
-            self.crypto_rss_feeds, 
-            self.crypto_keywords, 
-            "crypto news"
-        )
-    
-    def _fetch_macro_news(self) -> List[str]:
-        """Fetch macroeconomic and regulatory news."""
-        return self._fetch_from_rss(
-            self.macro_rss_feeds,
-            self.macro_keywords,
-            "macro/regulatory news"
-        )
-    
     def _fetch_market_summary(self, coingecko_data: Dict[str, Any] = None, 
                               crypto_headlines: List[str] = None, 
                               macro_headlines: List[str] = None) -> str:
@@ -410,9 +395,9 @@ class ResearchAgent:
             
             # Use provided headlines or fetch fresh ones if not provided
             if crypto_headlines is None:
-                crypto_headlines = self._fetch_crypto_news()
+                crypto_headlines = self._fetch_from_rss(self.crypto_rss_feeds, self.crypto_keywords, "crypto news")
             if macro_headlines is None:
-                macro_headlines = self._fetch_macro_news()
+                macro_headlines = self._fetch_from_rss(self.macro_rss_feeds, self.macro_keywords, "macro/regulatory news")
             
             # If no news available, return fallback
             if not crypto_headlines and not macro_headlines:
@@ -551,18 +536,31 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
             logger.error(f"Error formatting CoinGecko data for AI: {e}")
             return "Market data available but formatting error occurred."
     
-    def generate_daily_report(self, coingecko_data: Dict[str, Any] = None) -> str:
+    def generate_daily_report(self, coingecko_data: Dict[str, Any] = None, custom_query: Optional[str] = None, bypass_cache: bool = False) -> str:
         """
         Generate a comprehensive daily market research report.
         
         Args:
             coingecko_data: Real-time market data from CoinGecko API (optional)
+            custom_query: A specific, targeted query from the supervisor to override default keywords.
+            bypass_cache: If True, forces re-fetching and re-processing of all recent articles.
         
         Returns:
             Formatted markdown string containing the day's market intelligence
         """
         logger.info("Starting daily market research report generation...")
         
+        # --- Handle Dynamic Queries ---
+        crypto_keywords = self.crypto_keywords
+        macro_keywords = self.macro_keywords
+        
+        if custom_query:
+            logger.warning(f"🎯 Overriding default research with custom query: '{custom_query}'")
+            # Simple keyword extraction from the query. More advanced NLP could be used here.
+            query_keywords = [word for word in custom_query.replace(",", " ").replace(":", " ").lower().split() if len(word) > 2]
+            crypto_keywords = list(set(self.crypto_keywords + query_keywords))
+            macro_keywords = list(set(self.macro_keywords + query_keywords))
+
         report_sections = []
         current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         
@@ -578,7 +576,7 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
         try:
             # Fetch crypto news
             logger.info("Gathering crypto news...")
-            crypto_headlines = self._fetch_crypto_news()
+            crypto_headlines = self._fetch_from_rss(self.crypto_rss_feeds, crypto_keywords, "crypto news", bypass_cache=bypass_cache)
             if crypto_headlines:
                 report_sections.append("## 📰 Crypto News Headlines")
                 report_sections.extend(crypto_headlines)
@@ -601,7 +599,7 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
         try:
             # Fetch macro/regulatory news
             logger.info("Gathering macro and regulatory news...")
-            macro_headlines = self._fetch_macro_news()
+            macro_headlines = self._fetch_from_rss(self.macro_rss_feeds, macro_keywords, "macro/regulatory news", bypass_cache=bypass_cache)
             if macro_headlines:
                 report_sections.append("## 🏛️ Macro & Regulatory Updates")
                 report_sections.extend(macro_headlines)

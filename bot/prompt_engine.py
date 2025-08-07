@@ -152,7 +152,7 @@ class PromptEngine:
         #    "Last thesis achieved +3.2% vs BTC. SOL position was profitable (+5.1%). 
         #     Strategy shows positive momentum over last 7 days."
     
-    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "", trading_rules: str = "") -> str:
+    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "", trading_rules: str = "", performance_review: str = "", rejected_trades_review: str = "", refinement_context: Optional[str] = None) -> str:
         """
         Build the complete prompt by injecting context into the template.
         
@@ -162,6 +162,9 @@ class PromptEngine:
             last_thesis: Previous investment thesis
             coingecko_data: Real-time market data from CoinGecko
             trading_rules: Valid Kraken trading pairs and minimum order sizes
+            performance_review: (NEW) Analysis of the last trade cycle's performance.
+            rejected_trades_review: (NEW) Feedback on previously rejected trades.
+            refinement_context: (NEW) Specific feedback if this is a refinement loop.
             
         Returns:
             Complete prompt string ready for OpenAI API
@@ -173,8 +176,8 @@ class PromptEngine:
             # Truncate research report if needed
             truncated_research = self._truncate_text(research_report)
             
-            # Generate performance review
-            performance_review = self._generate_performance_review()
+            # (DEPRECATED) Generate performance review
+            # performance_review = self._generate_performance_review()
             
             # Inject all context into template
             prompt = self._template.format(
@@ -183,7 +186,9 @@ class PromptEngine:
                 last_thesis=last_thesis,
                 coingecko_data=coingecko_data,
                 trading_rules=trading_rules,
-                performance_review=performance_review
+                performance_review=performance_review or "No performance data available for this cycle.",
+                rejected_trades_review=rejected_trades_review or "No rejected trades to review.",
+                refinement_context=refinement_context or "This is the first attempt. No refinement context available."
             )
             
             # Log the final prompt for debugging
@@ -225,7 +230,7 @@ class PromptEngine:
             logger.warning(f"Failed to log prompt: {e}")
     
     def build_openai_request(self, portfolio_context: str, research_report: str, 
-                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o") -> dict:
+                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o", performance_review: str = "", rejected_trades_review: str = "", refinement_context: Optional[str] = None) -> dict:
         """
         Build complete OpenAI API request object with proper system/user message separation.
         
@@ -236,11 +241,14 @@ class PromptEngine:
             coingecko_data: Real-time market data from CoinGecko
             trading_rules: Valid Kraken trading pairs and minimum order sizes
             model: OpenAI model to use
+            performance_review: (NEW) Analysis of the last trade cycle's performance.
+            rejected_trades_review: (NEW) Feedback on previously rejected trades.
+            refinement_context: (NEW) Specific feedback for the refinement loop.
             
         Returns:
             Complete request object for OpenAI API with proper message structure
         """
-        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data, trading_rules)
+        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data, trading_rules, performance_review, rejected_trades_review, refinement_context)
         
         # Extract system instructions from prompt
         system_instructions, user_content = self._extract_system_instructions(prompt)
