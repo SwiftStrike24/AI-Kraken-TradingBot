@@ -43,8 +43,8 @@ class TraderAgent(BaseAgent):
         
         # Initialize OpenAI client
         try:
-            self.openai_client = OpenAI()  # API key loaded from environment
-            self.logger.info("OpenAI client initialized successfully")
+            self.openai_client = OpenAI(max_retries=2)  # API key loaded from environment
+            self.logger.info("OpenAI client initialized successfully with max_retries=2")
         except Exception as e:
             self.logger.error(f"Failed to initialize OpenAI client: {e}")
             raise
@@ -117,6 +117,11 @@ class TraderAgent(BaseAgent):
         try:
             self.logger.info(f"Calling OpenAI API with model: {model}")
             self.logger.debug(f"Prompt length: {len(prompt_text)} characters")
+            try:
+                est_tokens = len(prompt_text) // 4
+                self.logger.info(f"Preflight prompt size: est_tokens={est_tokens}, chars={len(prompt_text)}")
+            except Exception:
+                pass
             
             # Import PromptEngine to properly structure the request
             from bot.prompt_engine import PromptEngine

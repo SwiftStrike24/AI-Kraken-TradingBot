@@ -10,3 +10,5 @@ krakenex
 tqdm
 feedparser
 rich
+python-telegram-bot
+google-generativeai

@@ -22,6 +22,7 @@ from .coingecko_agent import CoinGeckoAgent
 from .analyst_agent import AnalystAgent
 from .strategist_agent import StrategistAgent
 from .trader_agent import TraderAgent
+from .reflection_agent import ReflectionAgent
 
 from bot.kraken_api import KrakenAPI
 from bot.trade_executor import TradeExecutor
@@ -32,6 +33,7 @@ from bot.performance_tracker import PerformanceTracker
 class PipelineState(Enum):
     """Enumeration of possible pipeline states."""
     IDLE = "idle"
+    RUNNING_REFLECTION = "running_reflection"
     RUNNING_COINGECKO = "running_coingecko"
     RUNNING_ANALYST = "running_analyst"
     RUNNING_STRATEGIST = "running_strategist"
@@ -86,6 +88,7 @@ class SupervisorAgent(BaseAgent):
         self.performance_tracker = PerformanceTracker(kraken_api, logs_dir)
         
         # Initialize agent team with unified session directory
+        self.reflection = ReflectionAgent(logs_dir, session_dir)
         self.coingecko = CoinGeckoAgent(logs_dir, session_dir)
         self.analyst = AnalystAgent(logs_dir, session_dir)
         self.strategist = StrategistAgent(kraken_api, logs_dir, session_dir)
@@ -116,6 +119,15 @@ class SupervisorAgent(BaseAgent):
         try:
             return agent_fn(*args, **kwargs)
         except Exception as e:
+            # --- NEW: CIRCUIT BREAKER for fatal errors ---
+            error_str = str(e).lower()
+            if "context_length_exceeded" in error_str or "invalid_request_error" in error_str:
+                self.logger.critical(f"🔥 FATAL ERROR in {agent_name}: {e}", exc_info=True)
+                self.logger.critical("   This is a non-recoverable error. The prompt is too long for the AI model.")
+                self.logger.critical("   The trading cycle will be aborted to prevent further errors.")
+                # Re-raise the exception to be caught by the top-level handler and stop the scheduler
+                raise e
+
             self.logger.error(f"🚨 {agent_name} failed: {e}", exc_info=True)
             self.execution_context["errors"].append(f"{agent_name} failed: {str(e)}")
             self.logger.warning(f"🛡️  Executing fallback for {agent_name}...")
@@ -188,11 +200,20 @@ class SupervisorAgent(BaseAgent):
         # --- FIX: Ensure fresh data on the first run of the cycle ---
         inputs['bypass_cache'] = True 
         
+        # --- NEW: REFLECTION STAGE ---
+        reflection_result = self._run_reflection_stage(inputs)
+        
+        # Make reflection available to Analyst/Research for report augmentation
+        try:
+            inputs["reflection_report"] = reflection_result.get("reflection_report", {})
+            inputs["reflection_model"] = "gemini-2.5-pro"
+        except Exception:
+            pass
+
         # Initial data gathering stages
         coingecko_result = self._run_coingecko_stage(inputs)
         analyst_result = self._run_analyst_stage(coingecko_result, inputs)
-        
-        # --- NEW (Phase 4): Preserve the initial, complete analyst report ---
+        # Keep the initial analyst report available for reuse during fast refinement
         initial_analyst_result = analyst_result
 
         while self.refinement_attempts < self.max_refinement_loops:
@@ -203,6 +224,7 @@ class SupervisorAgent(BaseAgent):
                 agent_name="Strategist-AI",
                 analyst_result=analyst_result,
                 coingecko_result=coingecko_result,
+                reflection_result=reflection_result, # Pass reflection report
                 inputs=inputs
             )
             if strategist_result.get("status") == "critical_failure":
@@ -234,29 +256,31 @@ class SupervisorAgent(BaseAgent):
                     "original_thesis": trader_result.get("trading_plan", {}).get("thesis")
                 }
 
-                # Delegate new task to Analyst for more data
-                self.logger.info("Delegating new task to Analyst-AI for more targeted research...")
+                # Decide whether to fast-skip research refetch
                 refinement_query = self._create_refinement_query(trader_result, final_decision.get("validation_result", {}).get("validation_issues", []))
-                # --- ENHANCED LOGGING (Phase 1) ---
-                self.logger.info(f"   REFINEMENT QUERY: {refinement_query}")
+                fast_refinement = inputs.get("fast_refinement", True)
+                if fast_refinement:
+                    self.logger.info("Fast refinement enabled: reusing prior Analyst-AI data, skipping RSS refetch")
+                    refinement_log["skipped_refetch"] = True
+                    refinement_log["new_analyst_focus"] = refinement_query
+                    self.execution_context["refinement_history"].append(refinement_log)
+                else:
+                    # Delegate new task to Analyst for more data
+                    self.logger.info("Delegating new task to Analyst-AI for more targeted research...")
+                    self.logger.info(f"   REFINEMENT QUERY: {refinement_query}")
+                    refined_analyst_inputs = inputs.copy()
+                    refined_analyst_inputs['research_focus'] = refinement_query
+                    # Force cache bypass during refinement to get fresh data
+                    refined_analyst_inputs['bypass_cache'] = True 
+                    analyst_result = self._run_analyst_stage(coingecko_result, refined_analyst_inputs)
+                    refinement_log["new_analyst_focus"] = refinement_query
+                    refinement_log["new_analyst_result"] = analyst_result.get("research_report", {}).get("market_context")
+                    self.execution_context["refinement_history"].append(refinement_log)
                 
-                # We need to create a new input for the analyst, based on the refinement query.
-                refined_analyst_inputs = inputs.copy()
-                refined_analyst_inputs['research_focus'] = refinement_query
-                # --- FIX: Force cache bypass during refinement to get fresh data ---
-                refined_analyst_inputs['bypass_cache'] = True 
-                
-                # Re-run the analyst with the new, focused query.
-                analyst_result = self._run_analyst_stage(coingecko_result, refined_analyst_inputs)
-                
-                refinement_log["new_analyst_focus"] = refinement_query
-                refinement_log["new_analyst_result"] = analyst_result.get("research_report", {}).get("market_context")
-                self.execution_context["refinement_history"].append(refinement_log)
-                
-                # --- NEW (Phase 2): Add the specific failure reason as context for the next attempt ---
+                # Add the specific failure reason as context for the next attempt
                 inputs['refinement_context'] = f"The previous plan was rejected for the following reason: '{rejection_reason}'. You MUST address this issue in your new plan."
                 
-                continue # Loop back to the strategist with the new, refined analyst data
+                continue # Loop back to the strategist with the (possibly reused) analyst data
 
             # If the plan is approved, break the loop and proceed to execution.
             break
@@ -283,10 +307,11 @@ class SupervisorAgent(BaseAgent):
         # --- EXECUTION STAGE ---
         execution_result = self._execute_trades_if_approved(final_decision)
         tracking_result = self._update_performance_tracking(execution_result)
-
+        
         return {
+            "reflection_result": reflection_result,
             "coingecko_result": coingecko_result,
-            "analyst_result": initial_analyst_result, # Return the original, full report
+            "analyst_result": initial_analyst_result,
             "strategist_result": strategist_result,
             "trader_result": trader_result,
             "final_decision": final_decision,
@@ -368,6 +393,39 @@ class SupervisorAgent(BaseAgent):
         query = f"The previous trading plan was rejected for low confidence. Conduct a deep dive on the following assets: {', '.join(unique_assets)}. Focus on finding recent (last 24 hours) news, on-chain data, or sentiment shifts that either strongly support or strongly contradict a trade. Ignore general market news and provide only specific, actionable intelligence on these assets."
         return query
 
+    def _run_reflection_stage(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the Reflection-AI stage of the pipeline.
+        
+        Args:
+            inputs: Initial pipeline inputs
+            
+        Returns:
+            Reflection execution results
+        """
+        self.logger.info("🧠 Stage 0: Running Historical Reflection Analysis")
+        self.current_state = PipelineState.RUNNING_REFLECTION
+        
+        try:
+            reflection_result = self.reflection.run(inputs)
+            self.execution_context["agent_outputs"]["reflection"] = reflection_result
+            
+            if reflection_result.get("status") == "error":
+                self.execution_context["warnings"].append(f"Reflection-AI failed: {reflection_result.get('error_message')}")
+                return self._reflection_fallback()
+            
+            self.logger.info("✅ Reflection-AI completed successfully")
+            return reflection_result
+            
+        except Exception as e:
+            self.logger.error(f"Reflection stage failed critically: {e}", exc_info=True)
+            self.execution_context["warnings"].append(f"Reflection stage failed critically: {str(e)}")
+            return self._reflection_fallback()
+
+    def _reflection_fallback(self):
+        """Fallback for Reflection-AI."""
+        self.logger.warning("Executing Reflection-AI fallback: No historical context will be available.")
+        return {"status": "fallback", "reflection_report": {"summary": "Historical reflection is unavailable due to an agent failure."}}
 
     def _run_coingecko_stage(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -435,7 +493,9 @@ class SupervisorAgent(BaseAgent):
                 "priority_keywords": inputs.get("priority_keywords", []),
                 "supervisor_directives": inputs,
                 "coingecko_data": coingecko_result,  # Pass the full CoinGecko data
-                "bypass_cache": inputs.get("bypass_cache", False), # Pass the flag through
+                "bypass_cache": inputs.get("bypass_cache", False),  # Pass the flag through
+                "reflection_report": inputs.get("reflection_report"),
+                "reflection_model": inputs.get("reflection_model"),
                 "coingecko_execution_context": {
                     "timestamp": coingecko_result.get("timestamp"),
                     "quality": coingecko_result.get("data_quality", {}),
@@ -466,13 +526,14 @@ class SupervisorAgent(BaseAgent):
         self.logger.warning("Executing Analyst-AI fallback: No news/market intelligence will be available.")
         return {"status": "fallback", "research_report": {"market_summary": "Market intelligence unavailable due to agent failure."}}
     
-    def _run_strategist_stage(self, analyst_result: Dict[str, Any], coingecko_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_strategist_stage(self, analyst_result: Dict[str, Any], coingecko_result: Dict[str, Any], reflection_result: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the Strategist-AI stage of the pipeline.
         
         Args:
             analyst_result: Results from the Analyst-AI
             coingecko_result: Results from the CoinGecko-AI
+            reflection_result: Results from the Reflection-AI
             inputs: Original pipeline inputs
             
         Returns:
@@ -484,6 +545,7 @@ class SupervisorAgent(BaseAgent):
         try:
             # Prepare strategist inputs with shared context
             strategist_inputs = {
+                "reflection_report": reflection_result.get("reflection_report", {}),
                 "research_report": analyst_result.get("research_report", {}),
                 "intelligence_quality": analyst_result.get("intelligence_quality", {}),
                 "coingecko_data": coingecko_result.get("market_data", {}),

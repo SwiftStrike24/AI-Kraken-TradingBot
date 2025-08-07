@@ -132,27 +132,38 @@ class PromptEngine:
             
         return '\n'.join(result_lines)
     
-    def _generate_performance_review(self) -> str:
+    def _log_prompt(self, prompt: str):
         """
-        Generate performance feedback summary for the thesis feedback loop.
+        Log the complete prompt to file for debugging and audit purposes.
+        Also logs prompt size metrics to the application logger.
         
-        V1 Implementation: Returns placeholder text
-        V2 Future: Will analyze trades.csv and equity.csv for actual performance data
-        
-        Returns:
-            Performance review text for prompt injection
+        Args:
+            prompt: The complete prompt to log
         """
-        # V1: Simple placeholder implementation
-        return "No performance data available for review (feature pending)."
-        
-        # V2 Future implementation would:
-        # 1. Read logs/trades.csv and logs/equity.csv
-        # 2. Calculate recent thesis accuracy and trade performance
-        # 3. Return structured feedback like:
-        #    "Last thesis achieved +3.2% vs BTC. SOL position was profitable (+5.1%). 
-        #     Strategy shows positive momentum over last 7 days."
+        try:
+            from datetime import datetime
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
+            log_filename = f"prompt_{timestamp}.txt"
+            log_path = os.path.join(self.prompt_logs_dir, log_filename)
+            
+            estimated_tokens = self._estimate_tokens(prompt)
+            logger.info(f"Prompt size: chars={len(prompt)}, est_tokens={estimated_tokens}")
+            
+            with open(log_path, 'w', encoding='utf-8') as f:
+                f.write(f"=== PROMPT LOG ===\n")
+                f.write(f"Timestamp: {datetime.utcnow().isoformat()}\n")
+                f.write(f"Template: {self.template_path}\n")
+                f.write(f"Max Tokens: {self.max_tokens or 'No Limit'}\n")
+                f.write(f"Estimated Tokens: {estimated_tokens}\n")
+                f.write(f"==================\n\n")
+                f.write(prompt)
+            
+            logger.debug(f"Logged prompt to {log_path}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to log prompt: {e}")
     
-    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "", trading_rules: str = "", performance_review: str = "", rejected_trades_review: str = "", refinement_context: Optional[str] = None) -> str:
+    def build_prompt(self, portfolio_context: str, research_report: str, last_thesis: str, coingecko_data: str = "", trading_rules: str = "", performance_review: str = "", rejected_trades_review: str = "", historical_reflection: str = "", refinement_context: Optional[str] = None) -> str:
         """
         Build the complete prompt by injecting context into the template.
         
@@ -164,6 +175,7 @@ class PromptEngine:
             trading_rules: Valid Kraken trading pairs and minimum order sizes
             performance_review: (NEW) Analysis of the last trade cycle's performance.
             rejected_trades_review: (NEW) Feedback on previously rejected trades.
+            historical_reflection: (NEW) Long-term analysis from the ReflectionAgent.
             refinement_context: (NEW) Specific feedback if this is a refinement loop.
             
         Returns:
@@ -176,9 +188,6 @@ class PromptEngine:
             # Truncate research report if needed
             truncated_research = self._truncate_text(research_report)
             
-            # (DEPRECATED) Generate performance review
-            # performance_review = self._generate_performance_review()
-            
             # Inject all context into template
             prompt = self._template.format(
                 portfolio_context=portfolio_context,
@@ -188,6 +197,7 @@ class PromptEngine:
                 trading_rules=trading_rules,
                 performance_review=performance_review or "No performance data available for this cycle.",
                 rejected_trades_review=rejected_trades_review or "No rejected trades to review.",
+                historical_reflection=historical_reflection or "No historical reflection available.",
                 refinement_context=refinement_context or "This is the first attempt. No refinement context available."
             )
             
@@ -202,35 +212,8 @@ class PromptEngine:
         except Exception as e:
             raise PromptEngineError(f"Failed to build prompt: {e}")
     
-    def _log_prompt(self, prompt: str):
-        """
-        Log the complete prompt to file for debugging and audit purposes.
-        
-        Args:
-            prompt: The complete prompt to log
-        """
-        try:
-            from datetime import datetime
-            timestamp = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
-            log_filename = f"prompt_{timestamp}.txt"
-            log_path = os.path.join(self.prompt_logs_dir, log_filename)
-            
-            with open(log_path, 'w', encoding='utf-8') as f:
-                f.write(f"=== PROMPT LOG ===\n")
-                f.write(f"Timestamp: {datetime.utcnow().isoformat()}\n")
-                f.write(f"Template: {self.template_path}\n")
-                f.write(f"Max Tokens: {self.max_tokens or 'No Limit'}\n")
-                f.write(f"Estimated Tokens: {self._estimate_tokens(prompt)}\n")
-                f.write(f"==================\n\n")
-                f.write(prompt)
-            
-            logger.debug(f"Logged prompt to {log_path}")
-            
-        except Exception as e:
-            logger.warning(f"Failed to log prompt: {e}")
-    
     def build_openai_request(self, portfolio_context: str, research_report: str, 
-                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o", performance_review: str = "", rejected_trades_review: str = "", refinement_context: Optional[str] = None) -> dict:
+                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o", performance_review: str = "", rejected_trades_review: str = "", historical_reflection: str = "", refinement_context: Optional[str] = None) -> dict:
         """
         Build complete OpenAI API request object with proper system/user message separation.
         
@@ -243,12 +226,13 @@ class PromptEngine:
             model: OpenAI model to use
             performance_review: (NEW) Analysis of the last trade cycle's performance.
             rejected_trades_review: (NEW) Feedback on previously rejected trades.
+            historical_reflection: (NEW) Long-term analysis from the ReflectionAgent.
             refinement_context: (NEW) Specific feedback for the refinement loop.
             
         Returns:
             Complete request object for OpenAI API with proper message structure
         """
-        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data, trading_rules, performance_review, rejected_trades_review, refinement_context)
+        prompt = self.build_prompt(portfolio_context, research_report, last_thesis, coingecko_data, trading_rules, performance_review, rejected_trades_review, historical_reflection, refinement_context)
         
         # Extract system instructions from prompt
         system_instructions, user_content = self._extract_system_instructions(prompt)

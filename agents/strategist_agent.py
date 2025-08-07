@@ -73,6 +73,7 @@ class StrategistAgent(BaseAgent):
         
         try:
             # Extract the market intelligence report and CoinGecko data
+            reflection_report = inputs.get('reflection_report', {})
             research_report = inputs.get('research_report', {})
             coingecko_data = inputs.get('coingecko_data', {})
             trending_data = inputs.get('trending_data', {})
@@ -101,6 +102,7 @@ class StrategistAgent(BaseAgent):
             
             # Construct the optimized prompt using the advanced prompt engine
             prompt_payload = self._construct_prompt_payload(
+                reflection_report,
                 research_report, 
                 coingecko_data,
                 trending_data,
@@ -453,7 +455,15 @@ class StrategistAgent(BaseAgent):
             rules_text += "7. NO CASH CONSTRAINTS: Even with limited cash, you can sell existing positions to fund new trades\n"
             # Add dynamic minimum order size warnings based on portfolio size
             try:
-                portfolio_context = self.get_portfolio_context()
+                # Reuse portfolio context if already computed in this execution
+                try:
+                    if 'cached_portfolio_context' in getattr(self, '__dict__', {}):
+                        portfolio_context = self.__dict__['cached_portfolio_context']
+                    else:
+                        portfolio_context = self.get_portfolio_context()
+                        self.__dict__['cached_portfolio_context'] = portfolio_context
+                except Exception:
+                    portfolio_context = self.get_portfolio_context()
                 portfolio_value = portfolio_context.get('total_equity', 0)
                 
                 rules_text += "\n⚠️ MINIMUM ORDER SIZE AWARENESS:\n"
@@ -489,7 +499,8 @@ class StrategistAgent(BaseAgent):
             self.logger.error(f"Failed to gather trading rules: {e}")
             return f"❌ ERROR: Could not fetch trading rules from Kraken API: {str(e)}"
     
-    def _construct_prompt_payload(self, research_report: Dict[str, Any], coingecko_data: Dict[str, Any],
+    def _construct_prompt_payload(self, reflection_report: Dict[str, Any], research_report: Dict[str, Any], 
+                                coingecko_data: Dict[str, Any],
                                 trending_data: Dict[str, Any], portfolio_context: Dict[str, Any], 
                                 performance_context: Dict[str, Any], thesis_context: Dict[str, Any],
                                 trading_rules: Dict[str, Any], supervisor_directives: Dict[str, Any],
@@ -498,6 +509,7 @@ class StrategistAgent(BaseAgent):
         Construct the final prompt payload using the advanced prompt engine.
         
         Args:
+            reflection_report: Historical analysis from Reflection-AI
             research_report: Market intelligence from Analyst-AI
             coingecko_data: Market data from CoinGecko-AI
             trending_data: Trending tokens data from CoinGecko-AI
@@ -513,6 +525,9 @@ class StrategistAgent(BaseAgent):
             Complete prompt payload ready for AI execution
         """
         try:
+            # Convert reflection report to text format
+            reflection_text = self._convert_reflection_to_text(reflection_report)
+
             # Convert research report to text format for the prompt engine
             research_text = self._convert_research_to_text(research_report)
             
@@ -531,6 +546,7 @@ class StrategistAgent(BaseAgent):
                 trading_rules=trading_rules, # Pass formatted trading rules to the prompt engine
                 performance_review=performance_context.get('last_cycle_analysis', {}).get('summary', 'No analysis available.'),
                 rejected_trades_review=rejected_trades_context,
+                historical_reflection=reflection_text, # Pass new reflection context
                 refinement_context=refinement_context
             )
             
@@ -551,7 +567,28 @@ class StrategistAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Prompt construction failed: {e}")
             raise
-    
+
+    def _convert_reflection_to_text(self, reflection_report: Dict[str, Any]) -> str:
+        """Convert structured reflection report to text format for prompt engine."""
+        if not reflection_report or not reflection_report.get('summary'):
+            return "No historical reflection available for this cycle."
+
+        summary = reflection_report.get('summary', 'No summary available.')
+        learnings = reflection_report.get('key_learnings', [])
+        focus = reflection_report.get('recommended_focus', 'No specific focus recommended.')
+
+        text_parts = [f"**Executive Summary:** {summary}\n"]
+        
+        if learnings:
+            text_parts.append("**Key Learnings from Past Cycles:**")
+            for learning in learnings:
+                text_parts.append(f"- {learning}")
+            text_parts.append("")
+
+        text_parts.append(f"**Recommended Focus for this Cycle:** {focus}")
+        
+        return "\n".join(text_parts)
+
     def _convert_research_to_text(self, research_report: Dict[str, Any]) -> str:
         """Convert structured research report back to text format for prompt engine."""
         if not research_report:

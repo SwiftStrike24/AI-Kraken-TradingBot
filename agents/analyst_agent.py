@@ -78,7 +78,13 @@ class AnalystAgent(BaseAgent):
                 pass # The existing generate_daily_report will still run, but this logic can be expanded.
 
             # Generate the comprehensive research report with CoinGecko data
-            raw_report = self.research_engine.generate_daily_report(coingecko_data, custom_query=research_focus if is_dynamic_query else None, bypass_cache=bypass_cache)
+            raw_report = self.research_engine.generate_daily_report(
+                coingecko_data,
+                custom_query=research_focus if is_dynamic_query else None,
+                bypass_cache=bypass_cache,
+                reflection=inputs.get('reflection_report'),
+                reflection_model=inputs.get('reflection_model', 'gemini-2.5-pro')
+            )
             
             # Process and structure the report
             structured_report = self._structure_report(raw_report, research_focus, priority_keywords)

@@ -1,4 +1,3 @@
-
 # ChatGPT-Kraken Portfolio Bot — Initial Implementation
 
 ## 🧠 Concept
@@ -8,6 +7,25 @@ It runs daily at 07:00 AM MST, evaluates the market using real-time data and com
 The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
+
+**🧠 REFLECTIVE INTELLIGENCE UPGRADE (August 11, 2025):** Historical Context & Self-Correction - IMPLEMENTED ✅
+- **Problem Solved:** 413 Request Entity Too Large from OpenAI due to oversized prompts (long cognitive transcripts + verbose context).
+- **Root Cause:** `<COGNITIVE_HISTORY>` injected raw transcripts; no holistic prompt-size budgeting across sections.
+- **Technical Solution:**
+  - **Reflection via Gemini 2.5 Pro:** `ReflectionAgent` now uses `gemini-2.5-pro` (1M context) to analyze long history and produce a compact JSON reflection. See `bot/gemini_client.py` and `bot/reflection_prompt_template.md`.
+  - **Lean Downstream Context:** Removed `<COGNITIVE_HISTORY>` from `bot/prompt_template.md`. Only the compact `historical_reflection` text is passed to `gpt-4o`.
+  - **Preflight Size Logs:** Added prompt-size logging (chars, est tokens) in `PromptEngine` and `TraderAgent` before API calls.
+- **Files Modified / Added:**
+  - `agents/reflection_agent.py` (Gemini integration, bounded transcripts, compact output)
+  - `bot/gemini_client.py` (NEW)
+  - `bot/reflection_prompt_template.md` (NEW)
+  - `bot/prompt_template.md` (removed `<COGNITIVE_HISTORY>`)
+  - `bot/prompt_engine.py` (removed `cognitive_history` arg; added size logs)
+  - `agents/strategist_agent.py` (stopped passing `cognitive_history`)
+  - `requirements.txt` (added `google-generativeai`)
+- **Impact:** Eliminates prompt bloat to OpenAI, while upgrading reflection quality via Gemini's 1M-token context. Trader prompts are leaner and more reliable.
+- **Config:** Set `GEMINI_API_KEY` env. Optional overrides: `GEMINI_REFLECTION_MODEL`, `GEMINI_TEMPERATURE`, `GEMINI_TOP_P`, `GEMINI_MAX_OUTPUT_TOKENS`.
+- **Status:** ✅ PRODUCTION READY
 
 **🛡️ ROBUSTNESS UPGRADE (August 2025):** Market Intelligence Pipeline - IMPLEMENTED ✅
 - **Problem Solved:** The bot was consistently failing to gather any relevant news headlines, causing the AI to operate without crucial market context and leading to poor decision-making quality.
@@ -259,6 +277,28 @@ graph TD
     F --> H;
 ```
 
+### ✨ **Reflective** Multi-Agent Architecture (August 11, 2025+)
+The latest architecture introduces a `ReflectionAgent` that runs at the start of the full cycle, endowing the system with long-term memory.
+
+```mermaid
+graph TD
+    subgraph "Full Trading Cycle (Now with Reflection)"
+        H[Start Cycle] --> R_A{Supervisor: Run ReflectionAgent};
+        R_A --> I[Get Historical Performance & Learnings];
+        I --> J{Supervisor: Run PerformanceAnalyst};
+        J --> K[Get Feedback on Last Trades];
+        K --> L{Supervisor: Run CoinGecko + Analyst Agents};
+        L --> M[Get Market Data & News];
+        M --> N{Supervisor: Run Strategist};
+        N --> O[Build Prompt with Reflection, Performance, and Market Data];
+        O --> P{Supervisor: Run Trader};
+        P --> Q[Generate Trading Plan];
+        Q --> S{Supervisor: Review Plan};
+        S -- Plan Rejected --> L;
+        S -- Plan Approved --> T[Execute Trades];
+    end
+```
+
 ---
 
 ## 📂 Project Structure
@@ -288,7 +328,8 @@ chatgpt-kraken-bot/
 │   ├── supervisor_agent.py      # Central orchestrator
 │   ├── analyst_agent.py         # Market intelligence specialist
 │   ├── strategist_agent.py      # Prompt engineering specialist
-│   └── trader_agent.py          # AI execution specialist
+│   ├── trader_agent.py          # AI execution specialist
+│   └── reflection_agent.py      # 🆕 Self-reflection and historical analysis
 ├── bot/                         # Core trading infrastructure
 │   ├── kraken_api.py            # ✅ ACTIVE
 │   ├── trade_executor.py        # ✅ ACTIVE  
@@ -636,6 +677,7 @@ The trading bot has been upgraded from a monolithic pipeline to a sophisticated 
 | **Analyst-AI** | Market Intelligence | News aggregation, sentiment analysis, CoinGecko data integration | Research directives + CoinGecko data | Enhanced intelligence report with quantitative context |
 | **Strategist-AI** | Prompt Engineering | Multi-source context assembly, OpenAI 2025 optimization | Intelligence + CoinGecko + portfolio data | Institutional-grade AI prompt payload |
 | **Trader-AI** | AI Execution | OpenAI API calls, response parsing, quality assessment | Enhanced prompt payload | Validated trading plan with confidence metrics |
+| **Reflection-AI** | Historical Analyst | Analyzes past performance, logs, and cognitive transcripts | Historical log data | Actionable "Reflection Report" summarizing learnings |
 
 ### Communication Protocol
 
@@ -659,6 +701,15 @@ The Supervisor-AI manages pipeline execution through well-defined states: IDLE �
 7.  **(NEW) Stage 5a - Refinement Loop:** If the plan is low-quality, the Supervisor can delegate new, targeted research tasks to the `Analyst-AI` and re-run the strategy formulation stages up to `max_refinement_loops` times.
 8.  **Stage 6:** Trade execution (if approved)
 9.  **Stage 7:** Performance tracking and cognitive logging
+
+### Reflective Pipeline Flow (August 11, 2025+)
+1.  **(NEW) Stage 0: Reflection:** `ReflectionAgent` analyzes all historical data (trades, equity, theses, transcripts) and produces a "Reflection Report".
+2.  **Stage 1: Performance Analysis:** `StrategistAgent` analyzes the PnL of the *most recent* trade cycle.
+3.  **Stage 2: Intelligence Gathering:** `CoinGeckoAgent` and `AnalystAgent` gather real-time market data and news.
+4.  **Stage 3: Strategy Formulation:** `StrategistAgent` builds a prompt including the **new Reflection Report**, performance review, and live market data.
+5.  **Stage 4: AI Decision:** `TraderAgent` queries the AI, which now has both long-term and short-term context.
+6.  **Stage 5: Supervisor Review & Refinement:** The `SupervisorAgent` validates the plan, potentially looping back for revisions.
+7.  **Stage 6: Execution & Logging:** Approved trades are executed.
 
 ### Quality Assurance & Validation
 
@@ -806,7 +857,7 @@ The enhanced multi-agent system provides significant improvements over the legac
 ### 🐞 Critical Bug Fix: Trade Validation Logic (August 2025) - RESOLVED ✅
 - **Problem Solved:** `TradeExecutor` was failing to validate `sell` orders, incorrectly reporting "Insufficient balance" even when funds were available.
 - **Root Cause:** The logic to identify the asset being sold (e.g., `XRP` from `XXRPZUSD`) was flawed. It used simple string manipulation (`.replace('USD', '')`), which failed on complex official pair names.
-- **Solution:** Rewrote the asset extraction logic in `_validate_trade_against_holdings` to use `kraken_api.get_pair_details()`. This method reliably fetches the official `base` asset for any given pair, ensuring balance checks are always performed against the correct holding.
+- **Solution:** Rewritten the asset extraction logic in `_validate_trade_against_holdings` to use `kraken_api.get_pair_details()`. This method reliably fetches the official `base` asset for any given pair, ensuring balance checks are always performed against the correct holding.
 - **Impact:** Sell order validation is now accurate and reliable, preventing erroneous trade rejections and improving overall trading robustness.
 - **Status:** ✅ PRODUCTION READY - Trade validation logic is now resilient to complex pair names.
 

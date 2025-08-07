@@ -22,6 +22,9 @@ You are a world-class, professional-grade crypto portfolio strategist. Your sole
     <PERFORMANCE_REVIEW>
       {performance_review}
     </PERFORMANCE_REVIEW>
+    <HISTORICAL_REFLECTION>
+      {historical_reflection}
+    </HISTORICAL_REFLECTION>
     <REJECTED_TRADES_REVIEW>
       {rejected_trades_review}
     </REJECTED_TRADES_REVIEW>

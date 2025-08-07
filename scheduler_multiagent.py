@@ -11,6 +11,7 @@ from datetime import datetime
 from agents import SupervisorAgent
 from bot.kraken_api import KrakenAPI, KrakenAPIError
 from bot.logger import setup_colored_logging, get_logger
+from bot.telegram_alerter import notify_dev_of_error
 
 # Set up logging to a file and to the console
 # logging.basicConfig(
@@ -28,7 +29,7 @@ setup_colored_logging()
 logger = get_logger(__name__)
 
 
-def run_multiagent_trading_cycle():
+def run_multiagent_trading_cycle(supervisor: SupervisorAgent):
     """
     Orchestrates the multi-agent trading cycle using the Supervisor-AI.
     
@@ -41,108 +42,92 @@ def run_multiagent_trading_cycle():
     """
     logger.info("=" * 80)
     logger.info("🚀 STARTING MULTI-AGENT TRADING CYCLE 🚀")
-    logger.info("=" * 80)
     logger.info(f"Cycle initiated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-    try:
-        # Initialize the Kraken API
-        logger.info("Initializing Kraken API...")
-        kraken_api = KrakenAPI()
-        logger.info("✅ Kraken API initialized successfully")
+    # No try/except here; let exceptions bubble up to the caller
+    # Initialize all modules (Supervisor is now passed in)
+    logger.info("Initializing bot modules...")
+    logger.info("Modules initialized successfully.")
+    
+    # Prepare pipeline inputs
+    pipeline_inputs = {
+        "cycle_trigger": "scheduled_daily_run",
+        "research_focus": "general_market_analysis",
+        "priority_keywords": ["bitcoin", "ethereum", "solana", "xrp", "trump", "genius", "clarity", "stablecoin", "sec", "fed", "regulation", "crypto", "project crypto", "america first", "tariff", "usa", "defi", "etf", "btc etf", "sol etf", "xrp etf", "crypto etf", "blackrock", "fidelity", "vanguard", "grayscale", "inflation", "interest rates", "rate hike", "rate cut", "powell", "fomc", "cpi", "ppi", "employment", "jobs report", "recession", "gdp", "institutional", "custody", "coinbase", "microstrategy", "tesla", "adoption"],
+        "strategic_focus": "alpha_generation",
+        "risk_parameters": "standard",
+        "execution_mode": "live_trading",
+        "cycle_timestamp": datetime.now().isoformat()
+    }
 
-        # Initialize the Supervisor-AI (which manages all other agents)
-        logger.info("Initializing Supervisor-AI and agent team...")
-        supervisor = SupervisorAgent(kraken_api)
-        logger.info("✅ Multi-agent system initialized successfully")
+    logger.info("🎯 Executing multi-agent trading pipeline...")
+    logger.info("Pipeline stages: Reflection-AI → CoinGecko-AI → Analyst-AI → Strategist-AI → Trader-AI → Supervisor Review → Execution")
 
-        # Prepare pipeline inputs
-        pipeline_inputs = {
-            "cycle_trigger": "scheduled_daily_run",
-            "research_focus": "general_market_analysis",
-            "priority_keywords": ["bitcoin", "ethereum", "solana", "xrp", "trump", "genius", "clarity", "stablecoin", "sec", "fed", "regulation", "crypto", "project crypto", "america first", "tariff", "usa", "defi", "etf", "btc etf", "sol etf", "xrp etf", "crypto etf", "blackrock", "fidelity", "vanguard", "grayscale", "inflation", "interest rates", "rate hike", "rate cut", "powell", "fomc", "cpi", "ppi", "employment", "jobs report", "recession", "gdp", "institutional", "custody", "coinbase", "microstrategy", "tesla", "adoption"],
-            "strategic_focus": "alpha_generation",
-            "risk_parameters": "standard",
-            "execution_mode": "live_trading",
-            "cycle_timestamp": datetime.now().isoformat()
-        }
+    # Execute the complete multi-agent pipeline
+    pipeline_result = supervisor.run(pipeline_inputs)
 
-        logger.info("🎯 Executing multi-agent trading pipeline...")
-        logger.info("Pipeline stages: CoinGecko-AI → Analyst-AI → Strategist-AI → Trader-AI → Supervisor Review → Execution")
-
-        # Execute the complete multi-agent pipeline
-        pipeline_result = supervisor.run(pipeline_inputs)
-
-        # Process results
-        if pipeline_result.get("status") == "success":
-            logger.info("🎉 MULTI-AGENT TRADING CYCLE COMPLETED SUCCESSFULLY")
-            
-            # Extract key metrics
-            execution_duration = pipeline_result.get("execution_duration_seconds", 0)
-            final_state = pipeline_result.get("final_state", "unknown")
-            
-            # Get pipeline summary
-            pipeline_summary = pipeline_result.get("pipeline_result", {}).get("pipeline_summary", {})
-            agents_executed = pipeline_summary.get("agents_executed", [])
-            trades_approved = pipeline_summary.get("trades_approved", False)
-            
-            logger.info(f"⏱️  Execution duration: {execution_duration:.1f} seconds")
-            logger.info(f"🤖 Agents executed: {', '.join(agents_executed)}")
-            logger.info(f"📊 Final pipeline state: {final_state}")
-            logger.info(f"✅ Trades approved: {'YES' if trades_approved else 'NO'}")
-            
-            # Log intelligence quality
-            intelligence_quality = pipeline_summary.get("market_intelligence_quality")
-            decision_quality = pipeline_summary.get("ai_decision_quality")
-            
-            if intelligence_quality:
-                logger.info(f"📰 Market intelligence quality: {intelligence_quality}")
-            if decision_quality:
-                logger.info(f"🧠 AI decision quality: {decision_quality:.2f}")
-
-            # Log any warnings or errors
-            warnings = pipeline_result.get("execution_context", {}).get("warnings", [])
-            errors = pipeline_result.get("execution_context", {}).get("errors", [])
-            
-            if warnings:
-                logger.warning(f"Pipeline completed with {len(warnings)} warnings:")
-                for warning in warnings:
-                    logger.warning(f"  - {warning}")
-            if errors:
-                logger.error(f"Pipeline completed with {len(errors)} errors:")
-                for error in errors:
-                    logger.error(f"  - {error}")
-                
-        else:
-            logger.error("❌ MULTI-AGENT TRADING CYCLE FAILED")
-            error_type = pipeline_result.get("error_type", "Unknown")
-            error_message = pipeline_result.get("error_message", "No details available")
-            final_state = pipeline_result.get("final_state", "unknown")
-            
-            logger.error(f"💥 Error type: {error_type}")
-            logger.error(f"💥 Error message: {error_message}")
-            logger.error(f"📊 Final state: {final_state}")
-            
-            # Log execution context for debugging
-            execution_context = pipeline_result.get("execution_context", {})
-            if execution_context.get("errors"):
-                logger.error("🔍 Detailed errors:")
-                for error in execution_context["errors"]:
-                    logger.error(f"   - {error}")
-
-    except KrakenAPIError as e:
-        logger.error(f"💥 Kraken API error: {e}")
-        logger.error("🔧 Check API credentials and network connectivity")
+    # Process results
+    if pipeline_result.get("status") == "success":
+        logger.info("🎉 MULTI-AGENT TRADING CYCLE COMPLETED SUCCESSFULLY")
         
-    except Exception as e:
-        logger.error(f"💥 Unexpected error in multi-agent trading cycle: {e}", exc_info=True)
-        logger.error("🔧 Check logs for detailed error information")
+        # Extract key metrics
+        execution_duration = pipeline_result.get("execution_duration_seconds", 0)
+        final_state = pipeline_result.get("final_state", "unknown")
         
-    finally:
-        logger.info("=" * 80)
-        logger.info("🏁 MULTI-AGENT TRADING CYCLE ENDED")
-        logger.info("=" * 80)
-        logger.info(f"Cycle completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        logger.info("")
+        # Get pipeline summary
+        pipeline_summary = pipeline_result.get("pipeline_result", {}).get("pipeline_summary", {})
+        agents_executed = pipeline_summary.get("agents_executed", [])
+        trades_approved = pipeline_summary.get("trades_approved", False)
+        
+        logger.info(f"⏱️  Execution duration: {execution_duration:.1f} seconds")
+        logger.info(f"🤖 Agents executed: {', '.join(agents_executed)}")
+        logger.info(f"📊 Final pipeline state: {final_state}")
+        logger.info(f"✅ Trades approved: {'YES' if trades_approved else 'NO'}")
+        
+        # Log intelligence quality
+        intelligence_quality = pipeline_summary.get("market_intelligence_quality")
+        decision_quality = pipeline_summary.get("ai_decision_quality")
+        
+        if intelligence_quality:
+            logger.info(f"📰 Market intelligence quality: {intelligence_quality}")
+        if decision_quality:
+            logger.info(f"🧠 AI decision quality: {decision_quality:.2f}")
+
+        # Log any warnings or errors
+        warnings = pipeline_result.get("execution_context", {}).get("warnings", [])
+        errors = pipeline_result.get("execution_context", {}).get("errors", [])
+        
+        if warnings:
+            logger.warning(f"Pipeline completed with {len(warnings)} warnings:")
+            for warning in warnings:
+                logger.warning(f"  - {warning}")
+        if errors:
+            logger.error(f"Pipeline completed with {len(errors)} errors:")
+            for error in errors:
+                logger.error(f"  - {error}")
+            
+    else:
+        logger.error("❌ MULTI-AGENT TRADING CYCLE FAILED")
+        error_type = pipeline_result.get("error_type", "Unknown")
+        error_message = pipeline_result.get("error_message", "No details available")
+        final_state = pipeline_result.get("final_state", "unknown")
+        
+        logger.error(f"💥 Error type: {error_type}")
+        logger.error(f"💥 Error message: {error_message}")
+        logger.error(f"📊 Final state: {final_state}")
+        
+        # Log execution context for debugging
+        execution_context = pipeline_result.get("execution_context", {})
+        if execution_context.get("errors"):
+            logger.error("🔍 Detailed errors:")
+            for error in execution_context["errors"]:
+                logger.error(f"   - {error}")
+
+    logger.info("=" * 80)
+    logger.info("🏁 MULTI-AGENT TRADING CYCLE ENDED")
+    logger.info("=" * 80)
+    logger.info(f"Cycle completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info("")
 
 def monitor_market(supervisor: SupervisorAgent):
     """
@@ -165,7 +150,15 @@ def monitor_market(supervisor: SupervisorAgent):
     
     if anomaly_detected:
         logger.warning("🚨 ANOMALY DETECTED! Triggering full trading cycle for immediate re-evaluation.")
-        run_multiagent_trading_cycle()
+        try:
+            run_multiagent_trading_cycle(supervisor)
+        except Exception as e:
+            error_message = f"A critical, unrecoverable error occurred during the triggered trading cycle: {e}"
+            logger.critical(f"🔥 {error_message}", exc_info=True)
+            logger.critical("🛑 The bot will now shut down to prevent further errors.")
+            notify_dev_of_error(error_message) # Send Telegram alert
+            import sys
+            sys.exit(1) # Exit with an error code
     else:
         logger.info("✅ No market anomalies detected. Continuing to monitor...")
 
@@ -179,7 +172,14 @@ def run_multiagent_demo():
     logger.info("This is a demonstration run - not part of the scheduled cycle")
     logger.info("")
     
-    run_multiagent_trading_cycle()
+    # --- FIX: Initialize Supervisor once for the demo run ---
+    try:
+        kraken_api = KrakenAPI()
+        supervisor = SupervisorAgent(kraken_api)
+        run_multiagent_trading_cycle(supervisor)
+    except Exception as e:
+        logger.error(f"❌ Demo run failed during initialization: {e}", exc_info=True)
+
 
 def handle_user_input(input_queue):
     """
@@ -202,7 +202,7 @@ def main():
     
     logger.info("🤖 Multi-Agent Trading Bot Scheduler Starting")
     logger.info("=" * 60)
-    logger.info("🏗️  Architecture: Supervisor-AI → [CoinGecko-AI, Analyst-AI, Strategist-AI, Trader-AI]")
+    logger.info("🏗️  Architecture: Supervisor-AI → [Reflection-AI, CoinGecko-AI, Analyst-AI, Strategist-AI, Trader-AI]")
     logger.info("⏰ Schedule: Daily at 07:00 MST")
     logger.info("🧠 Mode: Advanced Multi-Agent Cognitive System")
     logger.info("💰 Currency: USD Trading on Kraken")
@@ -211,8 +211,18 @@ def main():
     
     # Schedule the multi-agent trading cycle
     # Run every day at 07:00 MST
-    schedule.every().day.at("07:00").do(run_multiagent_trading_cycle)
-    
+    # --- FIX: Pass the single supervisor instance to the scheduled job ---
+    try:
+        kraken_api = KrakenAPI()
+        supervisor = SupervisorAgent(kraken_api)
+        logger.info("✅ Supervisor Agent initialized for continuous monitoring and scheduled runs.")
+        
+        schedule.every().day.at("07:00").do(run_multiagent_trading_cycle, supervisor=supervisor)
+        
+    except Exception as e:
+        logger.error(f"💥 Failed to initialize supervisor for monitoring: {e}")
+        return
+
     logger.info("⏰ Scheduled daily multi-agent trading cycle for 07:00 MST")
     logger.info("")
     logger.info("🎯 INTERACTIVE CONTROLS:")
@@ -226,14 +236,14 @@ def main():
     logger.info("🔄 Scheduler is now running...")
     logger.info("")
     
-    # --- NEW: Initialize Supervisor once for continuous monitoring ---
-    try:
-        kraken_api = KrakenAPI()
-        supervisor = SupervisorAgent(kraken_api)
-        logger.info("✅ Supervisor Agent initialized for continuous monitoring.")
-    except Exception as e:
-        logger.error(f"💥 Failed to initialize supervisor for monitoring: {e}")
-        return
+    # --- DEPRECATED: Supervisor is now initialized above ---
+    # try:
+    #     kraken_api = KrakenAPI()
+    #     supervisor = SupervisorAgent(kraken_api)
+    #     logger.info("✅ Supervisor Agent initialized for continuous monitoring.")
+    # except Exception as e:
+    #     logger.error(f"💥 Failed to initialize supervisor for monitoring: {e}")
+    #     return
 
     # Set up input handling
     import threading
@@ -268,11 +278,18 @@ def main():
                     logger.info("🚀 MANUAL TRIGGER: Starting trading cycle NOW!")
                     logger.info("=" * 50)
                     try:
-                        run_multiagent_trading_cycle()
+                        # --- FIX: Re-use the single supervisor instance for the manual run ---
+                        # A new session folder will be created by the supervisor's `execute` method
+                        run_multiagent_trading_cycle(supervisor)
                         logger.info("=" * 50)
                         logger.info("✅ Manual trading cycle completed successfully!")
                     except Exception as e:
-                        logger.error(f"❌ Manual trading cycle failed: {e}", exc_info=True)
+                        error_message = f"A critical, unrecoverable error occurred during the manual trading cycle: {e}"
+                        logger.critical(f"🔥 {error_message}", exc_info=True)
+                        logger.critical("🛑 The bot is shutting down. Please review the logs to diagnose the prompt context issue.")
+                        notify_dev_of_error(error_message) # Send Telegram alert
+                        import sys
+                        sys.exit(1)
                     logger.info("")
                     logger.info("🎯 Press [ENTER] to run again, [S] for status, [L] for equity, [P] for portfolio, [T] for trades, or [Ctrl+C] to stop")
                     logger.info("")
