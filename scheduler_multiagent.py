@@ -6,6 +6,8 @@ import schedule
 import time
 import logging
 from datetime import datetime
+import signal
+import threading
 
 # Import the multi-agent system
 from agents import SupervisorAgent
@@ -28,6 +30,17 @@ from bot.telegram_alerter import notify_dev_of_error
 setup_colored_logging()
 logger = get_logger(__name__)
 
+# --- Scheduler state ---
+pipeline_running = threading.Event()
+
+
+def _sigint_handler(signum, frame):
+    """Immediately terminate on Ctrl+C."""
+    logger.warning("🛑 SIGINT received. Shutting down immediately.")
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGINT, _sigint_handler)
+
 
 def run_multiagent_trading_cycle(supervisor: SupervisorAgent):
     """
@@ -40,6 +53,10 @@ def run_multiagent_trading_cycle(supervisor: SupervisorAgent):
     - Robust error handling and fallback mechanisms
     - Shared context to prevent agent fragmentation
     """
+    if pipeline_running.is_set():
+        logger.warning("⏳ A trading cycle is already running. New trigger ignored.")
+        return
+    pipeline_running.set()
     logger.info("=" * 80)
     logger.info("🚀 STARTING MULTI-AGENT TRADING CYCLE 🚀")
     logger.info(f"Cycle initiated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
@@ -64,7 +81,10 @@ def run_multiagent_trading_cycle(supervisor: SupervisorAgent):
     logger.info("Pipeline stages: Reflection-AI → CoinGecko-AI → Analyst-AI → Strategist-AI → Trader-AI → Supervisor Review → Execution")
 
     # Execute the complete multi-agent pipeline
-    pipeline_result = supervisor.run(pipeline_inputs)
+    try:
+        pipeline_result = supervisor.run(pipeline_inputs)
+    finally:
+        pipeline_running.clear()
 
     # Process results
     if pipeline_result.get("status") == "success":
@@ -129,6 +149,7 @@ def run_multiagent_trading_cycle(supervisor: SupervisorAgent):
     logger.info(f"Cycle completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info("")
 
+
 def monitor_market(supervisor: SupervisorAgent):
     """
     Performs a lightweight, continuous market monitoring check.
@@ -151,7 +172,10 @@ def monitor_market(supervisor: SupervisorAgent):
     if anomaly_detected:
         logger.warning("🚨 ANOMALY DETECTED! Triggering full trading cycle for immediate re-evaluation.")
         try:
-            run_multiagent_trading_cycle(supervisor)
+            if not pipeline_running.is_set():
+                run_multiagent_trading_cycle(supervisor)
+            else:
+                logger.warning("⏳ Skipping anomaly-triggered run: pipeline already running.")
         except Exception as e:
             error_message = f"A critical, unrecoverable error occurred during the triggered trading cycle: {e}"
             logger.critical(f"🔥 {error_message}", exc_info=True)
@@ -161,6 +185,14 @@ def monitor_market(supervisor: SupervisorAgent):
             sys.exit(1) # Exit with an error code
     else:
         logger.info("✅ No market anomalies detected. Continuing to monitor...")
+
+
+def _scheduled_job(supervisor: SupervisorAgent):
+    """Wrapper for scheduled runs to avoid concurrent execution."""
+    if pipeline_running.is_set():
+        logger.warning("⏭️  Skipping scheduled run: pipeline already running.")
+        return
+    run_multiagent_trading_cycle(supervisor)
 
 
 def run_multiagent_demo():
@@ -192,6 +224,7 @@ def handle_user_input(input_queue):
         except EOFError:
             break
 
+
 def main():
     """
     Main scheduler function for the multi-agent trading bot.
@@ -217,7 +250,7 @@ def main():
         supervisor = SupervisorAgent(kraken_api)
         logger.info("✅ Supervisor Agent initialized for continuous monitoring and scheduled runs.")
         
-        schedule.every().day.at("07:00").do(run_multiagent_trading_cycle, supervisor=supervisor)
+        schedule.every().day.at("07:00").do(_scheduled_job, supervisor=supervisor)
         
     except Exception as e:
         logger.error(f"💥 Failed to initialize supervisor for monitoring: {e}")
@@ -277,19 +310,22 @@ def main():
                     logger.info("")
                     logger.info("🚀 MANUAL TRIGGER: Starting trading cycle NOW!")
                     logger.info("=" * 50)
-                    try:
-                        # --- FIX: Re-use the single supervisor instance for the manual run ---
-                        # A new session folder will be created by the supervisor's `execute` method
-                        run_multiagent_trading_cycle(supervisor)
-                        logger.info("=" * 50)
-                        logger.info("✅ Manual trading cycle completed successfully!")
-                    except Exception as e:
-                        error_message = f"A critical, unrecoverable error occurred during the manual trading cycle: {e}"
-                        logger.critical(f"🔥 {error_message}", exc_info=True)
-                        logger.critical("🛑 The bot is shutting down. Please review the logs to diagnose the prompt context issue.")
-                        notify_dev_of_error(error_message) # Send Telegram alert
-                        import sys
-                        sys.exit(1)
+                    if pipeline_running.is_set():
+                        logger.warning("⏳ Manual trigger ignored: a trading cycle is already running.")
+                    else:
+                        try:
+                            # --- FIX: Re-use the single supervisor instance for the manual run ---
+                            # A new session folder will be created by the supervisor's `execute` method
+                            run_multiagent_trading_cycle(supervisor)
+                            logger.info("=" * 50)
+                            logger.info("✅ Manual trading cycle completed successfully!")
+                        except Exception as e:
+                            error_message = f"A critical, unrecoverable error occurred during the manual trading cycle: {e}"
+                            logger.critical(f"🔥 {error_message}", exc_info=True)
+                            logger.critical("🛑 The bot is shutting down. Please review the logs to diagnose the prompt context issue.")
+                            notify_dev_of_error(error_message) # Send Telegram alert
+                            import sys
+                            sys.exit(1)
                     logger.info("")
                     logger.info("🎯 Press [ENTER] to run again, [S] for status, [L] for equity, [P] for portfolio, [T] for trades, or [Ctrl+C] to stop")
                     logger.info("")
@@ -299,6 +335,7 @@ def main():
                     logger.info("📊 CURRENT STATUS:")
                     logger.info(f"   ⏰ Next scheduled run: {schedule.next_run()}")
                     logger.info(f"   🔄 Scheduler uptime: Running")
+                    logger.info(f"   🚦 Pipeline running: {'YES' if pipeline_running.is_set() else 'NO'}")
                     logger.info(f"   📁 Logs directory: logs/")
                     logger.info(f"   💰 Trading mode: Live (USD)")
                     logger.info("")

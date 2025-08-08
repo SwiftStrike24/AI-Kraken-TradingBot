@@ -10,7 +10,7 @@ own history and avoid repeating mistakes.
 import os
 import logging
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 from .base_agent import BaseAgent
@@ -56,6 +56,18 @@ class ReflectionAgent(BaseAgent):
         self._cache_value = None
         
         self.logger.info("Reflection Agent initialized. Ready to analyze history.")
+
+    def _parse_iso8601_utc(self, series: pd.Series) -> pd.Series:
+        """Parse ISO8601 strings (with optional fractional seconds) into UTC timestamps, vectorized.
+        Falls back gracefully if pandas lacks ISO8601 fast-path support.
+        """
+        try:
+            # Pandas 2.0+: fast ISO8601 path
+            parsed = pd.to_datetime(series, format="ISO8601", utc=True, errors="coerce")
+        except TypeError:
+            # Fallback: generic parser with dateutil
+            parsed = pd.to_datetime(series, utc=True, errors="coerce")
+        return parsed
 
     def _get_gemini_client(self):
         if self._gemini is None:
@@ -122,10 +134,17 @@ class ReflectionAgent(BaseAgent):
         
         try:
             equity_df = pd.read_csv(self.equity_log_path, names=['timestamp', 'total_equity_usd'])
-            equity_df['timestamp'] = pd.to_datetime(equity_df['timestamp'], errors='coerce', utc=True)
+            equity_df['timestamp'] = self._parse_iso8601_utc(equity_df['timestamp'])
+            equity_df['total_equity_usd'] = pd.to_numeric(equity_df['total_equity_usd'], errors='coerce')
             equity_df = equity_df.dropna(subset=['timestamp'])
+            equity_df = equity_df.dropna(subset=['total_equity_usd'])
+            parsed_count = len(equity_df)
+            self.logger.debug(f"Equity timestamps parsed (UTC): {parsed_count} rows")
+            if parsed_count:
+                self.logger.debug(f"Equity time range: {equity_df['timestamp'].min()} → {equity_df['timestamp'].max()}")
             
-            cutoff_date = datetime.now(pd.Timestamp.utcnow().tz) - timedelta(days=lookback_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            self.logger.debug(f"Equity cutoff (UTC): {cutoff_date}")
             recent_equity = equity_df[equity_df['timestamp'] > cutoff_date]
             
             if len(recent_equity) < 2:
@@ -133,6 +152,8 @@ class ReflectionAgent(BaseAgent):
 
             start_equity = recent_equity.iloc[0]['total_equity_usd']
             end_equity = recent_equity.iloc[-1]['total_equity_usd']
+            if pd.isna(start_equity) or pd.isna(end_equity):
+                return {"summary": "Equity data contains non-numeric values; skipping performance trend."}
             change_pct = ((end_equity - start_equity) / start_equity) * 100 if start_equity > 0 else 0
             
             trend = "profitable" if change_pct > 0 else "unprofitable"
@@ -150,10 +171,14 @@ class ReflectionAgent(BaseAgent):
 
         try:
             trades_df = pd.read_csv(self.trades_log_path)
-            trades_df['timestamp'] = pd.to_datetime(trades_df['timestamp'], errors='coerce', utc=True)
+            trades_df['timestamp'] = self._parse_iso8601_utc(trades_df['timestamp'])
             trades_df = trades_df.dropna(subset=['timestamp'])
+            self.logger.debug(f"Trades timestamps parsed (UTC): {len(trades_df)} rows")
+            if not trades_df.empty:
+                self.logger.debug(f"Trades time range: {trades_df['timestamp'].min()} → {trades_df['timestamp'].max()}")
 
-            cutoff_date = datetime.now(pd.Timestamp.utcnow().tz) - timedelta(days=lookback_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            self.logger.debug(f"Trades cutoff (UTC): {cutoff_date}")
             recent_trades = trades_df[trades_df['timestamp'] > cutoff_date]
             
             if recent_trades.empty:

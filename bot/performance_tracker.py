@@ -73,55 +73,39 @@ class PerformanceTracker:
         """
         logger.info("Calculating and logging total portfolio equity...")
         try:
-            balance = self.kraken_api.get_account_balance()
-            total_equity = 0.0
+            # Use the comprehensive portfolio context as the single source of truth
+            portfolio_ctx = self.kraken_api.get_comprehensive_portfolio_context()
 
-            # Start with cash balance (treat USD-denominated assets as $1.00 per unit)
-            cash_assets = {'USDC', 'USD', 'USDT'}
-            for cash_asset in cash_assets:
-                if cash_asset in balance:
-                    cash_amount = balance.pop(cash_asset, 0.0)
-                    total_equity += cash_amount
-                    logger.info(f"Cash {cash_asset}: ${cash_amount:.2f}")
+            total_equity = float(round(portfolio_ctx.get('total_equity', 0.0), 2))
+            cash_balance = float(round(portfolio_ctx.get('cash_balance', 0.0), 2))
+            crypto_value = float(round(portfolio_ctx.get('crypto_value', 0.0), 2))
 
-            if balance: # If there are other assets
-                # Filter out forex assets that we don't want to include in equity calculation
-                forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
-                crypto_assets = [asset for asset in balance.keys() if asset not in forex_assets]
-                
-                if crypto_assets:
-                    valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
-                    
-                    if valid_pairs:
-                        prices = self.kraken_api.get_ticker_prices(valid_pairs)
-                        
-                        for asset, amount in balance.items():
-                            if asset in crypto_assets:
-                                # Find the corresponding USD pair for this crypto asset
-                                asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
-                                if asset_pair and asset_pair in prices:
-                                    price = prices[asset_pair]['price']
-                                    value = amount * price
-                                    total_equity += value
-                                    logger.info(f"Crypto {asset}: {amount} * ${price:,.2f} = ${value:,.2f}")
-                                else:
-                                    logger.warning(f"Could not find USD price for crypto asset {asset}. It will not be included in equity calculation.")
-                            else:
-                                # For forex assets, log but don't include in equity
-                                logger.info(f"Forex {asset}: {amount} (excluded from equity calculation)")
-                    else:
-                        logger.warning("No valid USD pairs found for any crypto assets in balance")
-                        
-                # Log any remaining forex assets
-                forex_in_balance = forex_assets.intersection(balance.keys())
-                if forex_in_balance:
-                    for forex_asset in forex_in_balance:
-                        amount = balance[forex_asset]
-                        logger.info(f"Forex {forex_asset}: {amount} (excluded from equity calculation)")
-            
+            # Diagnostics to validate correctness against previous implementation issues
+            logger.info(f"Cash (USD/USDC/USDT): ${cash_balance:,.2f}")
+            logger.info(f"Crypto assets total value: ${crypto_value:,.2f}")
+
+            usd_values = portfolio_ctx.get('usd_values', {}) or {}
+            if usd_values:
+                # Show top 3 holdings by USD value for quick verification
+                try:
+                    top_holdings = sorted(
+                        [(a, d) for a, d in usd_values.items() if a != 'USD'],
+                        key=lambda x: x[1].get('value', 0.0),
+                        reverse=True
+                    )[:3]
+                    for asset, data in top_holdings:
+                        amount = data.get('amount', 0.0)
+                        price = data.get('price', 0.0)
+                        value = data.get('value', 0.0)
+                        logger.info(f"Holding {asset}: {amount:.6f} @ ${price:,.2f} = ${value:,.2f}")
+                except Exception:
+                    # Best-effort diagnostics
+                    pass
+
+            # Final log entry uses the unified total
             log_entry = {
                 'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
-                'total_equity_usd': round(total_equity, 2)
+                'total_equity_usd': total_equity
             }
             
             df = pd.DataFrame([log_entry])

@@ -21,6 +21,25 @@ class TradeExecutor:
         """
         self.kraken_api = kraken_api
 
+    def _round_volume_for_pair(self, pair: str, volume: float) -> float:
+        """
+        Round the volume to meet Kraken's precision rules for the given pair.
+        Uses lot_decimals when available and rounds down to avoid exceeding limits.
+        """
+        try:
+            details = self.kraken_api.get_pair_details(pair) or {}
+            # Kraken typically provides 'lot_decimals' for volume precision
+            lot_decimals = int(details.get('lot_decimals', 8))
+            if lot_decimals < 0 or lot_decimals > 10:
+                lot_decimals = 8
+            # Round down by formatting, avoiding floating issues
+            fmt = f"{{:.{lot_decimals}f}}"
+            rounded = float(fmt.format(volume))
+            # Ensure non-negative
+            return max(0.0, rounded)
+        except Exception:
+            return float(f"{volume:.8f}")
+
     def _normalize_pair(self, pair: str) -> str:
         """
         Cleans and standardizes a trading pair string.
@@ -208,13 +227,11 @@ class TradeExecutor:
             current_price = prices[normalized_pair]['price']
             
             # Calculate volume (asset amount to buy/sell)
-            if trade['action'].lower() == 'buy':
-                volume = usd_amount / current_price
-            else:  # sell
-                # For sell orders, we need to check available balance
-                # For now, assume we're selling the percentage of holdings
-                volume = usd_amount / current_price
+            volume = usd_amount / current_price if current_price > 0 else 0.0
             
+            # Round volume to meet Kraken precision constraints
+            volume = self._round_volume_for_pair(normalized_pair, volume)
+
             # Create new trade dict with volume
             new_trade = trade.copy()
             new_trade['volume'] = volume
@@ -300,6 +317,9 @@ class TradeExecutor:
                     pair = self._normalize_pair(converted_trade['pair'])
                     action = converted_trade['action'].lower()
                     volume = float(converted_trade['volume'])
+                    # Ensure volume respects pair precision
+                    volume = self._round_volume_for_pair(pair, volume)
+                    converted_trade['volume'] = volume
                     
                     allocation_pct = trade['allocation_percentage'] * 100
                     confidence = trade.get('confidence_score', 'N/A')
@@ -320,9 +340,11 @@ class TradeExecutor:
                     pair = self._normalize_pair(trade['pair'])
                     action = trade['action'].lower()
                     volume = float(trade['volume'])
+                    volume = self._round_volume_for_pair(pair, volume)
                     logger.info(f"Validating: {action.capitalize()} {volume:.8f} of {pair} (Legacy)")
                     trade_to_validate = trade.copy()
                     trade_to_validate['pair'] = pair
+                    trade_to_validate['volume'] = volume
                 
                 # PORTFOLIO VALIDATION: Check holdings for sell orders
                 is_valid, validation_msg, adjusted_trade = self._validate_trade_against_holdings(trade_to_validate)
@@ -339,10 +361,19 @@ class TradeExecutor:
                 # LOG PORTFOLIO IMPACT
                 self._log_portfolio_impact(trade_to_validate, portfolio_data)
                 
-                # PRE-VALIDATION: Check minimum order size
+                # PRE-VALIDATION: Check minimum order size and effective cost minimum
                 pair_details = self.kraken_api.get_pair_details(pair)
                 if pair_details:
                     ordermin = float(pair_details.get('ordermin', 0))
+                    costmin = float(pair_details.get('costmin', 0) or 0.0)
+                    # Fetch a price once for both impact & effective USD minimum
+                    try:
+                        prices = self.kraken_api.get_ticker_prices([pair])
+                        price = prices.get(pair, {}).get('price', trade_to_validate.get('estimated_price', 0) or 0)
+                    except Exception:
+                        price = trade_to_validate.get('estimated_price', 0) or 0
+                    
+                    # Units minimum check (ordermin)
                     if volume < ordermin:
                         original_pair = trade.get('pair', pair)
                         error_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {pair}"
@@ -350,8 +381,23 @@ class TradeExecutor:
                         logger.warning(f"⚠️ Skipping trade: {error_msg}")
                         results.append({'status': 'volume_too_small', 'trade': trade, 'error': user_friendly_msg})
                         continue
-                    else:
-                        logger.info(f"✅ Volume check passed: {volume:.8f} >= {ordermin:.8f} minimum for {pair}")
+                    
+                    # Effective USD minimum check (costmin or ordermin * price)
+                    trade_usd = volume * price if price else 0.0
+                    effective_min_usd = max(costmin, ordermin * price if price else 0.0)
+                    if effective_min_usd > 0 and trade_usd < effective_min_usd:
+                        original_pair = trade.get('pair', pair)
+                        logger.warning(
+                            f"⚠️ Skipping trade: USD value ${trade_usd:.2f} below effective minimum ${effective_min_usd:.2f} (costmin/ordermin*price) for {pair}"
+                        )
+                        results.append({
+                            'status': 'usd_value_too_small',
+                            'trade': trade,
+                            'error': f"USD value ${trade_usd:.2f} below effective minimum ${effective_min_usd:.2f} for {original_pair}"
+                        })
+                        continue
+                    
+                    logger.info(f"✅ Volume check passed: {volume:.8f} >= {ordermin:.8f} minimum for {pair}")
                 else:
                     logger.warning(f"⚠️ Could not verify minimum order size for {pair} - proceeding")
                 

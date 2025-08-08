@@ -1,14 +1,28 @@
 import logging
 import sys
+import os
 from rich.logging import RichHandler
+
+# --- Emoji toggle (auto-detect) ---
+USE_EMOJI = True
+# Disable by env override
+if os.getenv("LOG_EMOJI", "1") in {"0", "false", "False"}:
+    USE_EMOJI = False
+# Disable if stdout encoding is not utf
+enc = getattr(sys.stdout, "encoding", None)
+if enc and "utf" not in enc.lower():
+    USE_EMOJI = False
+# Disable on Windows legacy consoles without UTF-8
+if os.name == "nt" and not USE_EMOJI:
+    USE_EMOJI = False
 
 # --- Constants for Emojis and Colors ---
 LOG_LEVELS = {
-    "DEBUG": {"emoji": "🐛", "color": "cyan"},
-    "INFO": {"emoji": "✅", "color": "green"},
-    "WARNING": {"emoji": "⚠️ ", "color": "yellow"},
-    "ERROR": {"emoji": "❌", "color": "red"},
-    "CRITICAL": {"emoji": "🔥", "color": "bold red"},
+    "DEBUG": {"emoji": "🐛", "fallback": "DBG", "color": "cyan"},
+    "INFO": {"emoji": "✅", "fallback": "INF", "color": "green"},
+    "WARNING": {"emoji": "⚠️ ", "fallback": "WRN", "color": "yellow"},
+    "ERROR": {"emoji": "❌", "fallback": "ERR", "color": "red"},
+    "CRITICAL": {"emoji": "🔥", "fallback": "CRT", "color": "bold red"},
 }
 
 class CustomRichHandler(RichHandler):
@@ -18,8 +32,8 @@ class CustomRichHandler(RichHandler):
 
     def render_message(self, record: logging.LogRecord, message: str) -> str:
         """Render the message with a level-specific emoji and agent name."""
-        level_info = LOG_LEVELS.get(record.levelname, {"emoji": "➡️", "color": "white"})
-        emoji = level_info["emoji"]
+        level_info = LOG_LEVELS.get(record.levelname, {"emoji": "➡️", "fallback": "»", "color": "white"})
+        emoji = level_info["emoji"] if USE_EMOJI else level_info.get("fallback", "")
         
         # Format agent name from logger name
         agent_name_full = record.name
@@ -33,7 +47,8 @@ class CustomRichHandler(RichHandler):
             agent_name = record.name.upper()
 
         # Prepend emoji and agent name to the log message
-        record.msg = f"{emoji} [{agent_name}] {record.msg}"
+        prefix = f"{emoji} " if emoji else ""
+        record.msg = f"{prefix}[{agent_name}] {record.msg}"
         return super().render_message(record, message)
 
 def setup_colored_logging():
@@ -61,6 +76,9 @@ def setup_colored_logging():
     
     # Get the root logger
     log = logging.getLogger("rich")
+    # Advertise emoji mode once at startup
+    mode = "enabled" if USE_EMOJI else "disabled"
+    logging.getLogger(__name__).info(f"Logging emojis {mode} (encoding={enc})")
     return log
 
 def get_logger(name: str):

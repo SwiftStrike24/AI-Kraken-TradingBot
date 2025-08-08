@@ -186,6 +186,34 @@ The strategy is experimental, transparent, and performance-logged.
 - **🔧 OpenAI API Structure Fix:** Implemented proper system/user message separation across all agents for optimal AI performance and cost efficiency
 - **🎯 Research Agent Reliability:** Fixed duplicate fetching bug ensuring consistent market analysis generation
 
+**🔧 DATA INTEGRITY FIX (August 12, 2025):** Equity Calculation, Refinement Freshness, and Timestamp Hardening — IMPLEMENTED ✅
+- Problem Solved: Incorrect equity logging (e.g., ETH.F priced as $0, equity logged as only cash), ineffective refinement repeating the same invalid plan, and Pandas timestamp parsing warnings.
+- Root Causes:
+  1. `performance_tracker.py` duplicated fragile valuation logic and didn't normalize symbols/dust like `KrakenAPI.get_comprehensive_portfolio_context()`.
+  2. Refinement loop reused cached research even for "Volume below minimum" failures, so Trader kept proposing the same invalid trade.
+  3. Timestamp parsing relied on inference, triggering warnings and potential inconsistencies.
+- Technical Solutions:
+  - Unified Equity Source of Truth: `PerformanceTracker.log_equity()` now uses `KrakenAPI.get_comprehensive_portfolio_context()` (normalizes symbols like ETH.F, filters dust, values all assets) and logs top holdings for verification.
+  - Refinement Freshness Rule: Supervisor forces `bypass_cache=True` for Analyst when validation issues include "Volume below minimum", ensuring fresh inputs before the next strategy attempt.
+  - Timestamp Hardening: Explicit `format='ISO8601'` in `StrategistAgent` for equity/trades parsing to remove warnings and standardize UTC handling.
+- Files Modified:
+  - `bot/performance_tracker.py`
+  - `agents/supervisor_agent.py`
+  - `agents/strategist_agent.py`
+- Impact: Accurate equity curve for performance feedback, effective refinement that changes inputs when volume minimums block execution, and cleaner logs with robust date parsing.
+- Status: ✅ PRODUCTION READY
+
+**🛡️ ARCHITECTURE REFACTOR (August 12, 2025):** Unified Portfolio Valuation Logic — IMPLEMENTED ✅
+- **Problem Solved:** Critical self-correction failures and corrupted logs caused by inconsistent portfolio valuation. The refinement loop was failing because the Supervisor was giving the AI bad data (e.g., portfolio value of "$0.41" instead of "~$9.00").
+- **Root Cause:** A clear violation of the DRY (Don't Repeat Yourself) principle. The `SupervisorAgent` had its own outdated and buggy `_get_portfolio_value` method that failed to handle special asset names (like `ETH.F`), creating a second, unreliable source of truth for portfolio valuation that conflicted with the canonical `KrakenAPI` method.
+- **Technical Solution:**
+  - **Single Source of Truth:** Eliminated the redundant `_get_portfolio_value` method from `SupervisorAgent`.
+  - **Centralized Logic:** All parts of the `SupervisorAgent` that require portfolio value now call the canonical `self.kraken_api.get_comprehensive_portfolio_context()` method, which is already proven to be robust.
+- **Files Modified:**
+  - `agents/supervisor_agent.py`: Deleted the local `_get_portfolio_value` method and updated all internal calls to use the `KrakenAPI`'s canonical method.
+- **Impact:** The entire system now operates with a single, consistent, and accurate understanding of the portfolio's state. This fixes the corrupted self-correction feedback loop, ensures accurate validation, and improves overall system stability and reliability.
+- **Status:** ✅ PRODUCTION READY - The bot's core architecture is now more robust and less prone to data integrity issues.
+
 ---
 
 ## 🗓️ Start Date
@@ -1001,5 +1029,71 @@ AI output: {"trades": [{"pair": "ADAUSD", "action": "sell", "allocation_percenta
 ```
 
 **Result:** AI now understands it can actively rebalance portfolios by selling existing positions to fund new investment strategies based on market analysis.
+
+---
+
+## Maintenance: Clean Slate Runbook (August 2025)
+
+A new utility `cleanup_logs.py` provides a safe, Windows-friendly way to reset all bot-generated logs and caches before a fresh run.
+
+- Location: project root (`cleanup_logs.py`)
+- Default behavior: DRY-RUN (no deletion). Use `--execute` to actually delete.
+
+Supported targets (selective or all):
+- Directories: `logs/agent_transcripts/`, `logs/prompts/`
+- Files: `logs/equity.csv`, `logs/rejected_trades.csv`, `logs/research_cache.json`, `logs/scheduler_multiagent.log`, `logs/scheduler.log`, `logs/thesis_log.md`, `logs/trades.csv`, `logs/coingecko_cache.json`, `logs/daily_research_report.md`
+
+CLI
+
+- Preview (dry-run default):
+  - `python cleanup_logs.py`  (shows what would be deleted)
+  - `python cleanup_logs.py --targets transcripts,trades`  (scope selection)
+- Execute (with confirmation):
+  - `python cleanup_logs.py --all --execute`
+  - Add `--force` to skip interactive confirmation (CI): `python cleanup_logs.py --all --execute --force`
+- Retention by age:
+  - `python cleanup_logs.py --all --older-than 7`  (deletes only items older than 7 days; directories are pruned, not removed)
+- Backup before deletion:
+  - `python cleanup_logs.py --all --backup backups/logs_backup.zip --execute`
+- Lock detection (Windows best-effort):
+  - `python cleanup_logs.py --check-locks`
+- Verbose per-path output:
+  - `python cleanup_logs.py --verbose`
+
+Safety & Notes
+- Stop the bot (`scheduler_multiagent.py`) before executing; Windows may lock log files.
+- The script prints a summary: Deleted, Skipped (missing/too-new), Locked (skipped), Failed.
+- Exit codes: 0 success, 1 aborted, 2 failures.
+- After cleanup, the script recreates `logs/agent_transcripts/` and `logs/prompts/` to avoid first-run issues.
+
+Rationale
+- Avoids accidental data loss with dry-run and explicit confirmation.
+- Handles Windows file locks gracefully (skips locked, reports separately).
+- Centralizes targets to keep maintenance DRY and auditable.
+
+---
+
+### Scheduler Robustness (August 2025) - IMPLEMENTED ✅
+- Added immediate shutdown on `Ctrl+C` and concurrent-run guard to `scheduler_multiagent.py`.
+- Features:
+  - `Ctrl+C` terminates the scheduler immediately.
+  - Manual, scheduled, and anomaly triggers respect a `pipeline_running` guard; concurrent runs are skipped with a warning.
+  - Status panel (`[S]`) shows whether a pipeline is currently running.
+- Impact: Prevents duplicate concurrent runs when monitoring continuously and honors instant shutdown when requested.
+
+---
+
+### Logging & Emoji Toggle (August 2025) - IMPLEMENTED ✅
+- Added `LOG_EMOJI` env toggle with auto-detect of console encoding.
+- On non-UTF consoles (common on Windows), emojis are disabled and ASCII fallbacks are used to prevent mojibake.
+
+### Timestamp & Performance Context Hardening (August 2025) - IMPLEMENTED ✅
+- Reflection & Strategist now parse timestamps as UTC and coerce equity to numeric:
+  - Removed pandas inference warnings, ensured robust date math.
+  - Prevented string subtraction errors in performance calculations.
+- Strategist performance context now guards for insufficient/bad rows.
+
+### Supervisor Summary Accuracy (August 2025) - IMPLEMENTED ✅
+- `trades_approved` now reports TRUE only when at least one trade was executed successfully; defensive-hold shows FALSE.
 
 ---

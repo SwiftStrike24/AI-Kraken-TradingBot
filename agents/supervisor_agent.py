@@ -259,14 +259,16 @@ class SupervisorAgent(BaseAgent):
                 # Decide whether to fast-skip research refetch
                 refinement_query = self._create_refinement_query(trader_result, final_decision.get("validation_result", {}).get("validation_issues", []))
                 fast_refinement = inputs.get("fast_refinement", True)
-                if fast_refinement:
+                # Force fresh research when the issue is minimum volume, otherwise reuse
+                volume_issue = any("Volume below minimum" in issue for issue in final_decision.get("validation_result", {}).get("validation_issues", []))
+                if fast_refinement and not volume_issue:
                     self.logger.info("Fast refinement enabled: reusing prior Analyst-AI data, skipping RSS refetch")
                     refinement_log["skipped_refetch"] = True
                     refinement_log["new_analyst_focus"] = refinement_query
                     self.execution_context["refinement_history"].append(refinement_log)
                 else:
                     # Delegate new task to Analyst for more data
-                    self.logger.info("Delegating new task to Analyst-AI for more targeted research...")
+                    self.logger.info("Delegating new task to Analyst-AI for more targeted research (cache bypassed)...")
                     self.logger.info(f"   REFINEMENT QUERY: {refinement_query}")
                     refined_analyst_inputs = inputs.copy()
                     refined_analyst_inputs['research_focus'] = refinement_query
@@ -337,7 +339,7 @@ class SupervisorAgent(BaseAgent):
         if not validation_result.get("validation_passed", False):
             # Check if the failure is something refineable, like a minimum volume issue.
             issues = validation_result.get("validation_issues", [])
-            is_refineable = any("Volume below minimum" in issue for issue in issues)
+            is_refineable = any(("Volume below minimum" in issue) or ("USD value below effective minimum" in issue) for issue in issues)
             if is_refineable:
                 return True # This is a key fix: explicitly trigger refinement for this error type
             if not is_refineable:
@@ -810,6 +812,7 @@ class SupervisorAgent(BaseAgent):
                         continue
                     
                     min_volume = float(pair_details.get('ordermin', 0))
+                    costmin = float(pair_details.get('costmin', 0) or 0.0)
                     
                     # Calculate expected volume from allocation
                     if trade.get('action') == 'sell':
@@ -830,6 +833,19 @@ class SupervisorAgent(BaseAgent):
                     if calculated_volume < min_volume:
                         validation_issues.append(f"Trade {i+1}: Volume below minimum. Calculated {calculated_volume:.8f}, requires {min_volume:.8f} for {trade.get('pair')}")
 
+                    # Effective USD minimum check using live price
+                    try:
+                        prices = self.kraken_api.get_ticker_prices([normalized_pair])
+                        price_for_min = prices.get(normalized_pair, {}).get('price', 0)
+                        trade_usd_value = calculated_volume * price_for_min if price_for_min else 0.0
+                        effective_min_usd = max(costmin, min_volume * price_for_min if price_for_min else 0.0)
+                        if effective_min_usd > 0 and trade_usd_value < effective_min_usd:
+                            validation_issues.append(
+                                f"Trade {i+1}: USD value below effective minimum. Calculated ${trade_usd_value:.2f}, requires ${effective_min_usd:.2f} for {trade.get('pair')}"
+                            )
+                    except Exception:
+                        pass
+ 
                 except Exception as e:
                     validation_warnings.append(f"Trade {i+1}: Could not perform volume pre-validation: {e}")
 
@@ -853,42 +869,17 @@ class SupervisorAgent(BaseAgent):
     
     def _get_portfolio_value(self) -> float:
         """
-        Get the current portfolio value in USD for validation purposes.
-        
-        Returns:
-            Total portfolio value in USD
+        Get the current portfolio value in USD using the canonical method.
         """
         try:
-            balance = self.kraken_api.get_account_balance()
-            total_value = 0.0
-            
-            # Add cash balances
-            cash_assets = {'USD', 'USDC', 'USDT'}
-            for cash_asset in cash_assets:
-                total_value += balance.get(cash_asset, 0.0)
-            
-            # Add crypto asset values
-            forex_assets = {'CAD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'SEK', 'NOK', 'DKK'}
-            crypto_assets = [asset for asset in balance.keys() 
-                           if asset not in cash_assets and asset not in forex_assets and balance[asset] > 0]
-            
-            if crypto_assets:
-                valid_pairs = self.kraken_api.get_valid_usd_pairs_for_assets(crypto_assets)
-                if valid_pairs:
-                    prices = self.kraken_api.get_ticker_prices(valid_pairs)
-                    for asset in crypto_assets:
-                        amount = balance.get(asset, 0.0)
-                        if amount > 0:
-                            asset_pair = self.kraken_api.asset_to_usd_pair_map.get(asset)
-                            if asset_pair and asset_pair in prices:
-                                price = prices[asset_pair]['price']
-                                total_value += amount * price
-            
-            return total_value
-            
+            # Use the single source of truth for portfolio valuation.
+            # This method correctly handles asset normalization (e.g., ETH.F) and dust.
+            portfolio_context = self.kraken_api.get_comprehensive_portfolio_context()
+            return portfolio_context.get('total_equity', 0.0)
         except Exception as e:
-            self.logger.error(f"Error calculating portfolio value: {e}")
-            return 50.0  # Default to larger portfolio to keep 40% limit as fallback
+            self.logger.error(f"Critical error calculating portfolio value: {e}", exc_info=True)
+            # Fallback to a value that enforces stricter limits if portfolio can't be fetched.
+            return 50.0
     
     def _make_approval_decision(self, validation_result: Dict[str, Any], trading_plan: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -910,7 +901,11 @@ class SupervisorAgent(BaseAgent):
         approved = False
         approval_reason = ""
         
-        if not validation_passed:
+        # Reject empty trade plans (hold strategies should not be marked approved for execution)
+        trades = trading_plan.get("trades") if isinstance(trading_plan, dict) else None
+        if isinstance(trades, list) and len(trades) == 0:
+            approval_reason = "Plan contains no trades; marked as hold."
+        elif not validation_passed:
             approval_reason = f"Plan failed validation: {'; '.join(validation_result.get('validation_issues', []))}"
         elif quality_score < 0.3:
             approval_reason = f"Quality score too low: {quality_score}"
@@ -946,18 +941,32 @@ class SupervisorAgent(BaseAgent):
         
         if not approval_decision.get("approved", False):
             self.logger.info(f"❌ Trades not approved: {approval_decision.get('approval_reason')}")
-            return {
+            result = {
                 "executed": False,
                 "reason": "Plan not approved by supervisor",
                 "approval_reason": approval_decision.get("approval_reason"),
                 "trade_results": []
             }
+            # Persist for summary
+            self.execution_context["trade_execution"] = result
+            return result
         
         try:
             # Extract trading plan
             trading_plan = final_decision.get("trading_plan", {})
             
             self.logger.info("🚀 Executing approved trading plan")
+            # Guard: approved but empty plan → treat as hold, do not execute
+            if not isinstance(trading_plan, dict) or not trading_plan.get("trades"):
+                self.logger.info("Plan approved but contains no trades. Treating as HOLD; no execution performed.")
+                result = {
+                    "executed": False,
+                    "reason": "Empty approved plan (HOLD)",
+                    "trade_results": [],
+                    "execution_timestamp": datetime.now().isoformat()
+                }
+                self.execution_context["trade_execution"] = result
+                return result
             
             # Execute trades using the existing trade executor
             trade_results = self.trade_executor.execute_trades(trading_plan)
@@ -987,16 +996,20 @@ class SupervisorAgent(BaseAgent):
             }
             
             self.logger.info(f"✅ Trade execution completed: {execution_summary['successful_trades']}/{execution_summary['total_trades']} successful")
+            # Persist for summary
+            self.execution_context["trade_execution"] = execution_summary
             return execution_summary
             
         except Exception as e:
             self.logger.error(f"Trade execution failed: {e}")
-            return {
+            result = {
                 "executed": False,
                 "reason": "Execution error",
                 "error_message": str(e),
                 "trade_results": []
             }
+            self.execution_context["trade_execution"] = result
+            return result
     
     def _update_performance_tracking(self, execution_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1055,7 +1068,7 @@ class SupervisorAgent(BaseAgent):
             "pipeline_success": self.current_state == PipelineState.COMPLETED or self.current_state == PipelineState.EXECUTING_TRADES,
             "market_intelligence_quality": agent_outputs.get("analyst", {}).get("intelligence_quality", {}).get("quality_score"),
             "ai_decision_quality": agent_outputs.get("trader", {}).get("decision_quality", {}).get("overall_quality"),
-            "trades_approved": self.execution_context.get("final_review", {}).get("approval_decision", {}).get("approved", False)
+            "trades_approved": bool(self.execution_context.get("trade_execution", {}).get("executed", False) and (self.execution_context.get("trade_execution", {}).get("successful_trades", 0) > 0)),
         }
     
     def _generate_supervisor_reasoning(self, validation_result: Dict[str, Any], approval_decision: Dict[str, Any]) -> str:

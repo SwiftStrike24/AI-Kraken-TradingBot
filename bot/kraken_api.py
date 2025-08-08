@@ -270,6 +270,16 @@ class KrakenAPI:
                 if cash_asset in balance:
                     total_cash += balance[cash_asset]
             
+            # Normalize odd symbols (e.g., ETH.F -> ETH) commonly created by staking or fractional notations
+            normalized_balance = {}
+            for asset, amt in balance.items():
+                clean = asset
+                if asset.endswith('.F'):
+                    clean = asset.split('.')[0]
+                normalized_balance[clean] = normalized_balance.get(clean, 0.0) + amt
+
+            balance = normalized_balance
+
             # Identify crypto assets (excluding forex)
             crypto_assets = [asset for asset in balance.keys() 
                            if asset not in cash_assets and asset not in forex_assets]

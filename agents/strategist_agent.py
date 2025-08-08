@@ -11,7 +11,7 @@ This replaces the monolithic prompt_engine.py with a more cognitive, transparent
 import os
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -204,8 +204,11 @@ class StrategistAgent(BaseAgent):
             # Convert all timestamps to timezone-aware UTC.
             # The `utc=True` parameter correctly handles both timezone-aware strings (like in trades.csv)
             # and naive strings (like in equity.csv), converting everything to a consistent UTC format.
-            trades_df['timestamp'] = pd.to_datetime(trades_df['timestamp'], errors='coerce', utc=True)
-            equity_df['timestamp'] = pd.to_datetime(equity_df['timestamp'], errors='coerce', utc=True)
+            trades_df['timestamp'] = pd.to_datetime(trades_df['timestamp'], errors='coerce', utc=True, format='ISO8601')
+            equity_df['timestamp'] = pd.to_datetime(equity_df['timestamp'], errors='coerce', utc=True, format='ISO8601')
+            equity_df['total_equity_usd'] = pd.to_numeric(equity_df['total_equity_usd'], errors='coerce')
+            equity_df = equity_df.dropna(subset=['timestamp', 'total_equity_usd'])
+            self.logger.debug(f"Last-cycle equity rows: {len(equity_df)}, time range: {equity_df['timestamp'].min()} → {equity_df['timestamp'].max()}")
 
             # Find the timestamp of the last thesis
             last_thesis_time = self._get_last_thesis_timestamp()
@@ -221,7 +224,10 @@ class StrategistAgent(BaseAgent):
 
             # Calculate PnL for the cycle
             if not relevant_equity.empty:
-                start_equity = equity_df[equity_df['timestamp'] <= last_thesis_time].iloc[-1]['total_equity_usd']
+                before_thesis = equity_df[equity_df['timestamp'] <= last_thesis_time]
+                if before_thesis.empty:
+                    return {"status": "no_baseline", "summary": "No baseline equity at thesis time; cannot compute PnL."}
+                start_equity = before_thesis.iloc[-1]['total_equity_usd']
                 end_equity = relevant_equity.iloc[-1]['total_equity_usd']
                 pnl_usd = end_equity - start_equity
                 pnl_percent = (pnl_usd / start_equity) * 100 if start_equity != 0 else 0
@@ -260,7 +266,7 @@ class StrategistAgent(BaseAgent):
 
             # Get rejections from the last 24 hours
             rejected_df['timestamp'] = pd.to_datetime(rejected_df['timestamp'], errors='coerce', utc=True)
-            last_24_hours = datetime.now(pd.Timestamp.utcnow().tz) - timedelta(hours=24)
+            last_24_hours = datetime.now(timezone.utc) - timedelta(hours=24)
             recent_rejections = rejected_df[rejected_df['timestamp'] > last_24_hours]
 
             if recent_rejections.empty:
@@ -322,8 +328,11 @@ class StrategistAgent(BaseAgent):
             
             # Read the equity log (CSV has no headers: timestamp, total_equity_usd)
             equity_df = pd.read_csv(self.equity_log_path, names=['timestamp', 'total_equity_usd'])
-            
-            if len(equity_df) < 2:
+            # Coerce types
+            equity_df['timestamp'] = pd.to_datetime(equity_df['timestamp'], errors='coerce', utc=True, format='ISO8601')
+            equity_df['total_equity_usd'] = pd.to_numeric(equity_df['total_equity_usd'], errors='coerce')
+            equity_df = equity_df.dropna(subset=['timestamp', 'total_equity_usd'])
+            if equity_df.empty or len(equity_df) < 2:
                 return {
                     "status": "insufficient_history",
                     "total_return": 0.0,
@@ -465,30 +474,70 @@ class StrategistAgent(BaseAgent):
                 except Exception:
                     portfolio_context = self.get_portfolio_context()
                 portfolio_value = portfolio_context.get('total_equity', 0)
-                
-                rules_text += "\n⚠️ MINIMUM ORDER SIZE AWARENESS:\n"
+
+                rules_text += "\n⚠️ MINIMUM ORDER SIZE AWARENESS (Dynamic):\n"
                 rules_text += f"Current portfolio value: ${portfolio_value:.2f}\n"
-                
-                if portfolio_value < 50:
-                    rules_text += "⚠️ SMALL PORTFOLIO WARNING: Be extremely careful with minimum order sizes!\n"
-                    rules_text += "- XRP requires minimum 2.0 XRP (~$6.00) = {:.1f}% of your portfolio\n".format(6.00/portfolio_value*100 if portfolio_value > 0 else 0)
-                    rules_text += "- ETH requires minimum 0.002 ETH (~$7.00) = {:.1f}% of your portfolio\n".format(7.00/portfolio_value*100 if portfolio_value > 0 else 0)
-                    rules_text += "- BTC requires minimum 0.00005 BTC (~$5.50) = {:.1f}% of your portfolio\n".format(5.50/portfolio_value*100 if portfolio_value > 0 else 0)
-                    rules_text += "- Consider avoiding assets where minimum order exceeds 15% of portfolio\n"
-                else:
-                    rules_text += "For your portfolio size, most minimum order requirements should be manageable.\n"
-                    rules_text += "- XRP minimum: 2.0 XRP (~$6.00)\n"
-                    rules_text += "- ETH minimum: 0.002 ETH (~$7.00)\n"
-                    rules_text += "- BTC minimum: 0.00005 BTC (~$5.50)\n"
-                rules_text += "\n"
-                
+
+                # Compute dynamic effective USD minimum per pair: max(costmin, ordermin * live_price)
+                try:
+                    pair_names = list(usd_pairs.keys())
+                    prices = {}
+                    try:
+                        # Fetch prices in batches using Kraken (official pair names)
+                        chunk_size = 20
+                        for i in range(0, len(pair_names), chunk_size):
+                            chunk = pair_names[i:i+chunk_size]
+                            prices.update(self.kraken_api.get_ticker_prices(chunk))
+                    except Exception:
+                        prices = {}
+
+                    effective_mins = []
+                    for pair_name, pair_info in usd_pairs.items():
+                        base_asset_code = pair_info.get('base', '')
+                        clean_base = base_asset_code[1:] if base_asset_code.startswith(('X','Z')) and len(base_asset_code) > 1 else base_asset_code
+                        ordermin = float(pair_info.get('ordermin', 0))
+                        costmin = float(pair_info.get('costmin', 0) or 0.0)
+                        price = prices.get(pair_name, {}).get('price', 0.0)
+                        min_usd_by_ordermin = ordermin * price if price else 0.0
+                        effective_min_usd = max(costmin, min_usd_by_ordermin)
+                        if effective_min_usd > 0:
+                            pct_of_portfolio = (effective_min_usd / portfolio_value * 100) if portfolio_value > 0 else float('inf')
+                            effective_mins.append((clean_base, pair_name, ordermin, price, effective_min_usd, pct_of_portfolio))
+
+                    # Sort by effective USD minimum ascending
+                    effective_mins.sort(key=lambda x: x[4])
+
+                    # Show top 5 lowest and top 5 highest (relative to portfolio)
+                    rules_text += "\nLowest effective USD minimums (Top 5):\n"
+                    for base, pair_name, m_units, price, min_usd, pct in effective_mins[:5]:
+                        if price:
+                            rules_text += f"- {pair_name} ({base}/USD): min {m_units:.8f} {base} @ ${price:,.2f} ≈ ${min_usd:,.2f} ({pct:.1f}% of portfolio)\n"
+                        else:
+                            rules_text += f"- {pair_name} ({base}/USD): min {m_units:.8f} {base}, price unavailable; use costmin=${min_usd:,.2f} ({pct:.1f}%)\n"
+
+                    if effective_mins:
+                        # Sort by percentage of portfolio descending to highlight infeasible
+                        effective_mins_by_pct = sorted(effective_mins, key=lambda x: x[5], reverse=True)
+                        rules_text += "\nHighest relative minimums (Top 5):\n"
+                        for base, pair_name, m_units, price, min_usd, pct in effective_mins_by_pct[:5]:
+                            if price:
+                                rules_text += f"- {pair_name} ({base}/USD): min {m_units:.8f} {base} @ ${price:,.2f} ≈ ${min_usd:,.2f} ({pct:.1f}% of portfolio)\n"
+                            else:
+                                rules_text += f"- {pair_name} ({base}/USD): min {m_units:.8f} {base}, price unavailable; use costmin=${min_usd:,.2f} ({pct:.1f}%)\n"
+
+                    # Dynamic guidance based on portfolio size limits
+                    if portfolio_value < 50:
+                        rules_text += "\nGuidance: For small portfolios, avoid pairs where effective minimum exceeds your max allocation (95%).\n"
+                    else:
+                        rules_text += "\nGuidance: For larger portfolios, prefer pairs with lower effective minimums relative to target allocation (<=40%).\n"
+                    rules_text += "\n"
+                except Exception as e:
+                    rules_text += f"\n[Minimums summary unavailable due to error: {e}]\n\n"
+
             except Exception as e:
-                # Fallback to static warnings if portfolio data unavailable
+                # Fallback summary without hard-coded assets
                 rules_text += "\n⚠️ MINIMUM ORDER SIZE AWARENESS:\n"
-                rules_text += "Be careful with minimum order sizes - check portfolio value vs. minimums\n"
-                rules_text += "- XRP requires minimum 2.0 XRP (~$6.00)\n"
-                rules_text += "- ETH requires minimum 0.002 ETH (~$7.00)\n"
-                rules_text += "- BTC requires minimum 0.00005 BTC (~$5.50)\n\n"
+                rules_text += "Be careful with minimum order sizes — ensure (allocation_percentage × portfolio_value) ÷ price >= ordermin, and meet any costmin.\n\n"
             
             rules_text += f"📊 Total tradeable pairs: {len(usd_pairs)}\n"
             rules_text += f"🔄 Rules updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
