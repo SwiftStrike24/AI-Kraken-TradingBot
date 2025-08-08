@@ -12,11 +12,17 @@ import logging
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
+import re
+from openai import OpenAI, APIError
+import json
 
 from .base_agent import BaseAgent
 
 # --- CONFIGURATION ---
 TRANSCRIPT_SESSIONS_TO_ANALYZE = 1 # The number of recent, non-empty session folders to analyze
+# Use "openai" for GPT-5 or "gemini" for Gemini 2.5 Pro
+REFLECTION_PROVIDER = "openai"
+
 
 class ReflectionAgent(BaseAgent):
     """
@@ -48,8 +54,9 @@ class ReflectionAgent(BaseAgent):
         # Reflection template path
         self.reflection_template_path = os.path.join("bot", "reflection_prompt_template.md")
         
-        # Lazy Gemini client import (to avoid hard dependency if not configured)
-        self._gemini = None
+        # Lazy client imports (to avoid hard dependency if not configured)
+        self._gemini_client = None
+        self._openai_client = None
         
         # Simple in-memory cache for this process
         self._cache_key = None
@@ -70,10 +77,15 @@ class ReflectionAgent(BaseAgent):
         return parsed
 
     def _get_gemini_client(self):
-        if self._gemini is None:
+        if self._gemini_client is None:
             from bot.gemini_client import GeminiClient
-            self._gemini = GeminiClient()
-        return self._gemini
+            self._gemini_client = GeminiClient()
+        return self._gemini_client
+
+    def _get_openai_client(self):
+        if self._openai_client is None:
+            self._openai_client = OpenAI(max_retries=2)
+        return self._openai_client
 
     def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -102,8 +114,8 @@ class ReflectionAgent(BaseAgent):
             # 4. (bounded) Analyze cognitive history from agent transcripts
             cognitive_history = self._analyze_agent_transcripts()
 
-            # 5. Synthesize via Gemini for long-context reasoning
-            reflection_report = self._synthesize_with_gemini(
+            # 5. Synthesize for long-context reasoning
+            reflection_report = self._synthesize_reflection_report(
                 performance_analysis,
                 trade_patterns,
                 thesis_evolution,
@@ -286,6 +298,108 @@ class ReflectionAgent(BaseAgent):
             self.logger.error(f"Error analyzing agent transcripts: {e}", exc_info=True)
             return {"summary": "An error occurred during transcript analysis.", "full_text": ""}
 
+    def _synthesize_reflection_report(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
+        """Synthesizes reflection report using the configured provider (OpenAI GPT-5 or Gemini)."""
+        if REFLECTION_PROVIDER == "openai":
+            self.logger.info("Synthesizing reflection with OpenAI (GPT-5)...")
+            return self._synthesize_with_openai(performance, trades, thesis, cognition)
+        elif REFLECTION_PROVIDER == "gemini":
+            self.logger.info("Synthesizing reflection with Gemini...")
+            return self._synthesize_with_gemini(performance, trades, thesis, cognition)
+        else:
+            self.logger.warning(f"Unknown reflection provider '{REFLECTION_PROVIDER}', using heuristic fallback.")
+            return self._heuristic_synthesis_fallback(performance, trades, thesis, cognition)
+
+    def _synthesize_with_openai(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
+        """Use OpenAI GPT-5 to produce a concise reflection JSON."""
+        try:
+            # Cache guard: reuse result if inputs haven't changed in this process run
+            import hashlib
+            base_str = "|".join([
+                performance.get('summary', ''),
+                trades.get('summary', ''),
+                thesis.get('summary', ''),
+                cognition.get('summary', ''),
+                str(len(cognition.get('full_text', '')))
+            ])
+            cache_key = hashlib.sha256(base_str.encode('utf-8')).hexdigest()
+            if self._cache_key == cache_key and self._cache_value is not None:
+                self.logger.info("Using cached reflection synthesis result (inputs unchanged)")
+                return self._cache_value
+
+            # Load template
+            with open(self.reflection_template_path, 'r', encoding='utf-8') as f:
+                template = f.read()
+
+            system_instructions = self._extract_between(template, '<SYSTEM>', '</SYSTEM>')
+            
+            # Build input blocks
+            performance_block = performance.get('summary', '')
+            trades_block = trades.get('summary', '')
+            thesis_block = thesis.get('summary', '')
+            transcripts_block = cognition.get('full_text', '')
+
+            prompt = template.replace('{performance_block}', performance_block)
+            prompt = prompt.replace('{trades_block}', trades_block)
+            prompt = prompt.replace('{thesis_block}', thesis_block)
+            prompt = prompt.replace('{transcripts_block}', transcripts_block)
+
+            # Extract user content from the full prompt (without system instructions)
+            user_content = re.sub(r'<SYSTEM>.*?</SYSTEM>\s*', '', prompt, flags=re.DOTALL).strip()
+
+            client = self._get_openai_client()
+            
+            from bot.openai_config import get_default_openai_model, get_fallback_openai_model, build_chat_completion_params
+
+            models_to_try = [get_default_openai_model(), get_fallback_openai_model()]
+            openai_json = None
+            last_error = None
+
+            for model in models_to_try:
+                try:
+                    params = build_chat_completion_params(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_instructions},
+                            {"role": "user", "content": user_content}
+                        ],
+                        response_format={"type": "json_object"}
+                    )
+                    response = client.chat.completions.create(**params)
+                    content = response.choices[0].message.content or ""
+                    openai_json = json.loads(content)
+                    self.logger.info(f"Successfully synthesized reflection with OpenAI model: {model}")
+                    break # Success
+                except Exception as e:
+                    self.logger.warning(f"OpenAI model '{model}' failed for reflection: {e}")
+                    last_error = e
+                    continue
+            
+            if openai_json is None:
+                raise last_error if last_error else Exception("All OpenAI models failed for reflection.")
+
+            # Adapt to strategist-friendly shape
+            summary_text = openai_json.get('summary_250w', '')
+            lean = {
+                "summary": summary_text or f"{performance.get('summary','')} {trades.get('summary','')} {thesis.get('summary','')} {cognition.get('summary','')}",
+                "key_learnings": [
+                    item for item in [
+                        openai_json.get('what_worked', ''),
+                        openai_json.get('what_failed', ''),
+                        openai_json.get('guardrails', '')
+                    ] if item
+                ],
+                "recommended_focus": openai_json.get('actionable_rules', '') or "Use actionable patterns and guardrails from reflection."
+            }
+
+            # Store cache
+            self._cache_key = cache_key
+            self._cache_value = lean
+            return lean
+        except Exception as e:
+            self.logger.warning(f"OpenAI synthesis failed, falling back to heuristic: {e}")
+            return self._heuristic_synthesis_fallback(performance, trades, thesis, cognition)
+
     def _synthesize_with_gemini(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
         """Use Gemini 2.5 Pro to produce a concise reflection JSON, then adapt to our downstream schema."""
         try:
@@ -350,7 +464,7 @@ class ReflectionAgent(BaseAgent):
             return lean
         except Exception as e:
             self.logger.warning(f"Gemini synthesis failed, falling back to heuristic: {e}")
-            return self._synthesize_reflection_report(performance, trades, thesis, cognition)
+            return self._heuristic_synthesis_fallback(performance, trades, thesis, cognition)
 
     def _extract_between(self, text: str, start_tag: str, end_tag: str) -> str:
         try:
@@ -360,7 +474,7 @@ class ReflectionAgent(BaseAgent):
         except ValueError:
             return "You are a senior crypto quantitative coach. Return strict JSON only."
 
-    def _synthesize_reflection_report(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
+    def _heuristic_synthesis_fallback(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
         """Heuristic synthesis fallback (legacy)."""
         summary = f"{performance.get('summary', '')} {trades.get('summary', '')} {thesis.get('summary', '')} {cognition.get('summary', '')}"
         key_learnings = []

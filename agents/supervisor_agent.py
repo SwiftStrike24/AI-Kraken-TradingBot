@@ -205,10 +205,28 @@ class SupervisorAgent(BaseAgent):
         
         # Make reflection available to Analyst/Research for report augmentation
         try:
+            from .reflection_agent import REFLECTION_PROVIDER
+            
+            reflection_model_name = "Unknown"
+            if REFLECTION_PROVIDER == "openai":
+                from bot.openai_config import get_default_openai_model
+                model_id = get_default_openai_model()
+                if "gpt-5" in model_id:
+                    reflection_model_name = "OpenAI GPT-5"
+                else:
+                    reflection_model_name = f"OpenAI {model_id}"
+            
+            elif REFLECTION_PROVIDER == "gemini":
+                from bot.gemini_client import DEFAULT_MODEL as GEMINI_MODEL_NAME
+                reflection_model_name = f"Google {GEMINI_MODEL_NAME}"
+
+            inputs["reflection_report"] = reflection_result.get("reflection_report", {})
+            inputs["reflection_model"] = reflection_model_name
+        except Exception as e:
+            self.logger.warning(f"Could not set reflection model name: {e}")
+            # Fallback for safety
             inputs["reflection_report"] = reflection_result.get("reflection_report", {})
             inputs["reflection_model"] = "gemini-2.5-pro"
-        except Exception:
-            pass
 
         # Initial data gathering stages
         coingecko_result = self._run_coingecko_stage(inputs)
