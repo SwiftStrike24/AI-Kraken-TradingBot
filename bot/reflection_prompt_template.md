@@ -14,6 +14,15 @@ You are a senior crypto quantitative coach and research lead. You analyze long h
 
 - COGNITIVE TRANSCRIPTS (last sessions, raw excerpts allowed):
 {transcripts_block}
+
+- EQUITY CSV (recent, raw):
+{equity_raw_block}
+
+- TRADES CSV (recent, raw):
+{trades_raw_block}
+
+- LATEST DAILY RESEARCH REPORT (raw excerpt):
+{latest_research_block}
 </INPUTS>
 
 <TASK>

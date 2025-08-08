@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 import re
 from openai import OpenAI, APIError
 import json
+import hashlib
 
 from .base_agent import BaseAgent
 
@@ -22,6 +23,23 @@ from .base_agent import BaseAgent
 TRANSCRIPT_SESSIONS_TO_ANALYZE = 1 # The number of recent, non-empty session folders to analyze
 # Use "openai" for GPT-5 or "gemini" for Gemini 2.5 Pro
 REFLECTION_PROVIDER = "openai"
+
+# New: raw data inclusion toggles and limits (env-overridable)
+INCLUDE_EQUITY_RAW = os.getenv("REFLECTION_INCLUDE_EQUITY_RAW", "1").lower() in {"1", "true", "yes"}
+INCLUDE_TRADES_RAW = os.getenv("REFLECTION_INCLUDE_TRADES_RAW", "1").lower() in {"1", "true", "yes"}
+INCLUDE_RESEARCH_RAW = os.getenv("REFLECTION_INCLUDE_RESEARCH_REPORT", "1").lower() in {"1", "true", "yes"}
+MAX_CSV_ROWS = int(os.getenv("REFLECTION_MAX_CSV_ROWS", "200"))
+MAX_RESEARCH_CHARS = int(os.getenv("REFLECTION_MAX_RESEARCH_CHARS", "5000"))
+
+# Prompt size thresholds (approx 4 chars/token)
+WARN_TOKENS = int(os.getenv("REFLECTION_WARN_TOKENS", "24000"))
+CLAMP_TOKENS = int(os.getenv("REFLECTION_CLAMP_TOKENS", "50000"))
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return len(text) // 4
 
 
 class ReflectionAgent(BaseAgent):
@@ -50,6 +68,7 @@ class ReflectionAgent(BaseAgent):
         self.rejected_trades_log_path = os.path.join(logs_dir, "rejected_trades.csv")
         self.thesis_log_path = os.path.join(logs_dir, "thesis_log.md")
         self.transcript_archive_dir = os.path.join(logs_dir, "agent_transcripts")
+        self.daily_research_report_path = os.path.join(logs_dir, "daily_research_report.md")
         
         # Reflection template path
         self.reflection_template_path = os.path.join("bot", "reflection_prompt_template.md")
@@ -69,10 +88,8 @@ class ReflectionAgent(BaseAgent):
         Falls back gracefully if pandas lacks ISO8601 fast-path support.
         """
         try:
-            # Pandas 2.0+: fast ISO8601 path
             parsed = pd.to_datetime(series, format="ISO8601", utc=True, errors="coerce")
         except TypeError:
-            # Fallback: generic parser with dateutil
             parsed = pd.to_datetime(series, utc=True, errors="coerce")
         return parsed
 
@@ -86,6 +103,99 @@ class ReflectionAgent(BaseAgent):
         if self._openai_client is None:
             self._openai_client = OpenAI(max_retries=2)
         return self._openai_client
+
+    def _load_equity_raw(self, max_rows: int) -> str:
+        if not INCLUDE_EQUITY_RAW:
+            self.logger.info("Reflection: equity raw block disabled via env")
+            return ""
+        if not os.path.exists(self.equity_log_path):
+            self.logger.warning("Reflection: equity.csv not found; skipping raw block")
+            return ""
+        try:
+            df = pd.read_csv(self.equity_log_path, names=["timestamp", "total_equity_usd"]) if self._has_header(self.equity_log_path) is False else pd.read_csv(self.equity_log_path)
+            # Normalize
+            df["timestamp"] = self._parse_iso8601_utc(df["timestamp"]).dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            df["total_equity_usd"] = pd.to_numeric(df["total_equity_usd"], errors="coerce")
+            df = df.dropna(subset=["timestamp", "total_equity_usd"]) 
+            if df.empty:
+                return ""
+            # Keep last N rows
+            tail = df.tail(max_rows)
+            time_range = f"{tail['timestamp'].iloc[0]} → {tail['timestamp'].iloc[-1]}"
+            csv_text = tail.to_csv(index=False)
+            self.logger.info(f"Reflection: equity.csv rows_included={len(tail)}, time_range={time_range}")
+            return csv_text
+        except Exception as e:
+            self.logger.warning(f"Reflection: failed to load equity raw: {e}")
+            return ""
+
+    def _load_trades_raw(self, max_rows: int) -> str:
+        if not INCLUDE_TRADES_RAW:
+            self.logger.info("Reflection: trades raw block disabled via env")
+            return ""
+        if not os.path.exists(self.trades_log_path):
+            self.logger.warning("Reflection: trades.csv not found; skipping raw block")
+            return ""
+        try:
+            df = pd.read_csv(self.trades_log_path)
+            if "timestamp" in df.columns:
+                df["timestamp"] = self._parse_iso8601_utc(df["timestamp"]).dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            df = df.dropna(subset=["timestamp"]) if "timestamp" in df.columns else df
+            if df.empty:
+                return ""
+            tail = df.tail(max_rows)
+            time_range = f"{tail['timestamp'].iloc[0]} → {tail['timestamp'].iloc[-1]}" if "timestamp" in tail.columns else "unknown"
+            csv_text = tail.to_csv(index=False)
+            self.logger.info(f"Reflection: trades.csv rows_included={len(tail)}, time_range={time_range}")
+            return csv_text
+        except Exception as e:
+            self.logger.warning(f"Reflection: failed to load trades raw: {e}")
+            return ""
+
+    def _load_latest_research(self, max_chars: int, override_text: Optional[str] = None) -> str:
+        if not INCLUDE_RESEARCH_RAW:
+            self.logger.info("Reflection: research raw block disabled via env")
+            return ""
+        try:
+            if override_text is not None and override_text.strip():
+                text = override_text
+                source = "override"
+                generated = None
+            else:
+                if not os.path.exists(self.daily_research_report_path):
+                    self.logger.warning("Reflection: daily_research_report.md not found; skipping raw block")
+                    return ""
+                with open(self.daily_research_report_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+                source = "file"
+                # Parse Generated header
+                m = re.search(r"\*\*Generated:\*\*\s*(.+)", text)
+                generated = m.group(1).strip() if m else "unknown"
+            # Tail-prefer excerpt if too long
+            if len(text) > max_chars:
+                excerpt = text[:1000] + "\n\n[... truncated ...]\n\n" + text[-(max_chars-1500):]
+            else:
+                excerpt = text
+            # Log provenance
+            mtime = None
+            if source == "file":
+                try:
+                    mtime = datetime.fromtimestamp(os.path.getmtime(self.daily_research_report_path)).isoformat()
+                except Exception:
+                    mtime = "unknown"
+            self.logger.info(f"Reflection: research source={source}, generated={generated}, mtime={mtime}, chars_included={len(excerpt)}")
+            return excerpt
+        except Exception as e:
+            self.logger.warning(f"Reflection: failed to load latest research: {e}")
+            return ""
+
+    def _has_header(self, path: str) -> bool:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                first = f.readline().lower()
+                return ("timestamp" in first and "," in first)
+        except Exception:
+            return False
 
     def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -101,7 +211,13 @@ class ReflectionAgent(BaseAgent):
         
         try:
             lookback_days = inputs.get('reflection_lookback_days', 3)
-            
+
+            # Raw blocks (with optional override for freshest research)
+            latest_research_override = inputs.get("latest_research_override")
+            equity_raw = self._load_equity_raw(MAX_CSV_ROWS)
+            trades_raw = self._load_trades_raw(MAX_CSV_ROWS)
+            latest_research = self._load_latest_research(MAX_RESEARCH_CHARS, latest_research_override)
+
             # 1. Analyze performance trends from equity log
             performance_analysis = self._analyze_performance_trends(lookback_days)
             
@@ -114,12 +230,47 @@ class ReflectionAgent(BaseAgent):
             # 4. (bounded) Analyze cognitive history from agent transcripts
             cognitive_history = self._analyze_agent_transcripts()
 
-            # 5. Synthesize for long-context reasoning
+            # 5. Preflight size logs
+            blocks = {
+                "performance": performance_analysis.get('summary', ''),
+                "trades_summary": trade_patterns.get('summary', ''),
+                "thesis_summary": thesis_evolution.get('summary', ''),
+                "transcripts": cognitive_history.get('full_text', ''),
+                "equity_raw": equity_raw,
+                "trades_raw": trades_raw,
+                "latest_research": latest_research,
+            }
+            per_block_tokens = {k: _estimate_tokens(v) for k, v in blocks.items()}
+            total_tokens = sum(per_block_tokens.values())
+            self.logger.info(f"Reflection prompt preflight tokens: total≈{total_tokens}, per_block={per_block_tokens}")
+
+            # 6. Clamp if needed
+            clamped = False
+            adj_max_rows = MAX_CSV_ROWS
+            adj_max_chars = MAX_RESEARCH_CHARS
+            if total_tokens > CLAMP_TOKENS:
+                adj_max_rows = max(50, MAX_CSV_ROWS // 2)
+                adj_max_chars = max(1500, MAX_RESEARCH_CHARS // 2)
+                equity_raw = self._load_equity_raw(adj_max_rows)
+                trades_raw = self._load_trades_raw(adj_max_rows)
+                latest_research = self._load_latest_research(adj_max_chars, latest_research_override)
+                clamped = True
+                # recompute tokens
+                blocks.update({"equity_raw": equity_raw, "trades_raw": trades_raw, "latest_research": latest_research})
+                per_block_tokens = {k: _estimate_tokens(v) for k, v in blocks.items()}
+                total_tokens = sum(per_block_tokens.values())
+            if clamped or total_tokens > WARN_TOKENS:
+                self.logger.warning(f"Reflection prompt size: total≈{total_tokens} tokens (clamped={clamped}); per_block={per_block_tokens}")
+
+            # 7. Synthesize for long-context reasoning
             reflection_report = self._synthesize_reflection_report(
                 performance_analysis,
                 trade_patterns,
                 thesis_evolution,
-                cognitive_history
+                cognitive_history,
+                equity_raw,
+                trades_raw,
+                latest_research
             )
             
             self.logger.info("Historical reflection process completed.")
@@ -128,7 +279,9 @@ class ReflectionAgent(BaseAgent):
                 "status": "success",
                 "agent": "Reflection-AI",
                 "reflection_report": reflection_report,
-                "data_sources_analyzed": ["equity.csv", "trades.csv", "thesis_log.md", "agent_transcripts"]
+                "data_sources_analyzed": ["equity.csv", "trades.csv", "thesis_log.md", "agent_transcripts", "daily_research_report.md"],
+                "size_tokens_total": total_tokens,
+                "size_tokens_per_block": per_block_tokens,
             }
         except Exception as e:
             self.logger.error(f"Failed to generate reflection report: {e}", exc_info=True)
@@ -149,7 +302,6 @@ class ReflectionAgent(BaseAgent):
             equity_df['timestamp'] = self._parse_iso8601_utc(equity_df['timestamp'])
             equity_df['total_equity_usd'] = pd.to_numeric(equity_df['total_equity_usd'], errors='coerce')
             equity_df = equity_df.dropna(subset=['timestamp'])
-            equity_df = equity_df.dropna(subset=['total_equity_usd'])
             parsed_count = len(equity_df)
             self.logger.debug(f"Equity timestamps parsed (UTC): {parsed_count} rows")
             if parsed_count:
@@ -298,29 +450,31 @@ class ReflectionAgent(BaseAgent):
             self.logger.error(f"Error analyzing agent transcripts: {e}", exc_info=True)
             return {"summary": "An error occurred during transcript analysis.", "full_text": ""}
 
-    def _synthesize_reflection_report(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
+    def _synthesize_reflection_report(self, performance: dict, trades: dict, thesis: dict, cognition: dict, equity_raw: str = "", trades_raw: str = "", latest_research: str = "") -> Dict[str, Any]:
         """Synthesizes reflection report using the configured provider (OpenAI GPT-5 or Gemini)."""
         if REFLECTION_PROVIDER == "openai":
             self.logger.info("Synthesizing reflection with OpenAI (GPT-5)...")
-            return self._synthesize_with_openai(performance, trades, thesis, cognition)
+            return self._synthesize_with_openai(performance, trades, thesis, cognition, equity_raw, trades_raw, latest_research)
         elif REFLECTION_PROVIDER == "gemini":
             self.logger.info("Synthesizing reflection with Gemini...")
-            return self._synthesize_with_gemini(performance, trades, thesis, cognition)
+            return self._synthesize_with_gemini(performance, trades, thesis, cognition, equity_raw, trades_raw, latest_research)
         else:
             self.logger.warning(f"Unknown reflection provider '{REFLECTION_PROVIDER}', using heuristic fallback.")
             return self._heuristic_synthesis_fallback(performance, trades, thesis, cognition)
 
-    def _synthesize_with_openai(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
+    def _synthesize_with_openai(self, performance: dict, trades: dict, thesis: dict, cognition: dict, equity_raw: str = "", trades_raw: str = "", latest_research: str = "") -> Dict[str, Any]:
         """Use OpenAI GPT-5 to produce a concise reflection JSON."""
         try:
             # Cache guard: reuse result if inputs haven't changed in this process run
-            import hashlib
             base_str = "|".join([
                 performance.get('summary', ''),
                 trades.get('summary', ''),
                 thesis.get('summary', ''),
                 cognition.get('summary', ''),
-                str(len(cognition.get('full_text', '')))
+                str(len(cognition.get('full_text', ''))),
+                hashlib.sha256((equity_raw or '').encode('utf-8')).hexdigest(),
+                hashlib.sha256((trades_raw or '').encode('utf-8')).hexdigest(),
+                hashlib.sha256((latest_research or '').encode('utf-8')).hexdigest(),
             ])
             cache_key = hashlib.sha256(base_str.encode('utf-8')).hexdigest()
             if self._cache_key == cache_key and self._cache_value is not None:
@@ -338,11 +492,14 @@ class ReflectionAgent(BaseAgent):
             trades_block = trades.get('summary', '')
             thesis_block = thesis.get('summary', '')
             transcripts_block = cognition.get('full_text', '')
-
+            
             prompt = template.replace('{performance_block}', performance_block)
             prompt = prompt.replace('{trades_block}', trades_block)
             prompt = prompt.replace('{thesis_block}', thesis_block)
             prompt = prompt.replace('{transcripts_block}', transcripts_block)
+            prompt = prompt.replace('{equity_raw_block}', equity_raw or '[no equity data]')
+            prompt = prompt.replace('{trades_raw_block}', trades_raw or '[no trades data]')
+            prompt = prompt.replace('{latest_research_block}', latest_research or '[no research report]')
 
             # Extract user content from the full prompt (without system instructions)
             user_content = re.sub(r'<SYSTEM>.*?</SYSTEM>\s*', '', prompt, flags=re.DOTALL).strip()
@@ -400,17 +557,19 @@ class ReflectionAgent(BaseAgent):
             self.logger.warning(f"OpenAI synthesis failed, falling back to heuristic: {e}")
             return self._heuristic_synthesis_fallback(performance, trades, thesis, cognition)
 
-    def _synthesize_with_gemini(self, performance: dict, trades: dict, thesis: dict, cognition: dict) -> Dict[str, Any]:
+    def _synthesize_with_gemini(self, performance: dict, trades: dict, thesis: dict, cognition: dict, equity_raw: str = "", trades_raw: str = "", latest_research: str = "") -> Dict[str, Any]:
         """Use Gemini 2.5 Pro to produce a concise reflection JSON, then adapt to our downstream schema."""
         try:
             # Cache guard: reuse result if inputs haven't changed in this process run
-            import hashlib
             base_str = "|".join([
                 performance.get('summary', ''),
                 trades.get('summary', ''),
                 thesis.get('summary', ''),
                 cognition.get('summary', ''),
-                str(len(cognition.get('full_text', '')))
+                str(len(cognition.get('full_text', ''))),
+                hashlib.sha256((equity_raw or '').encode('utf-8')).hexdigest(),
+                hashlib.sha256((trades_raw or '').encode('utf-8')).hexdigest(),
+                hashlib.sha256((latest_research or '').encode('utf-8')).hexdigest(),
             ])
             cache_key = hashlib.sha256(base_str.encode('utf-8')).hexdigest()
             if self._cache_key == cache_key and self._cache_value is not None:
@@ -431,6 +590,9 @@ class ReflectionAgent(BaseAgent):
             prompt = prompt.replace('{trades_block}', trades_block)
             prompt = prompt.replace('{thesis_block}', thesis_block)
             prompt = prompt.replace('{transcripts_block}', transcripts_block)
+            prompt = prompt.replace('{equity_raw_block}', equity_raw or '[no equity data]')
+            prompt = prompt.replace('{trades_raw_block}', trades_raw or '[no trades data]')
+            prompt = prompt.replace('{latest_research_block}', latest_research or '[no research report]')
 
             client = self._get_gemini_client()
             gemini_json = client.generate_json(system=system, prompt=prompt)
@@ -442,6 +604,9 @@ class ReflectionAgent(BaseAgent):
                 prompt_no_tx = prompt_no_tx.replace('{trades_block}', trades_block)
                 prompt_no_tx = prompt_no_tx.replace('{thesis_block}', thesis_block)
                 prompt_no_tx = prompt_no_tx.replace('{transcripts_block}', "[omitted]")
+                prompt_no_tx = prompt_no_tx.replace('{equity_raw_block}', equity_raw or '[no equity data]')
+                prompt_no_tx = prompt_no_tx.replace('{trades_raw_block}', trades_raw or '[no trades data]')
+                prompt_no_tx = prompt_no_tx.replace('{latest_research_block}', latest_research or '[no research report]')
                 gemini_json = client.generate_json(system=system, prompt=prompt_no_tx)
 
             # Adapt to strategist-friendly shape

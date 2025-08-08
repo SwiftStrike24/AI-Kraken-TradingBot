@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from bot.kraken_api import KrakenAPI
@@ -28,6 +28,7 @@ class PerformanceTracker:
         self.equity_log_path = os.path.join(logs_dir, "equity.csv")
         self.trades_log_path = os.path.join(logs_dir, "trades.csv")
         self.thesis_log_path = os.path.join(logs_dir, "thesis_log.md")
+        self.pnl_log_path = os.path.join(logs_dir, "pnl.csv")
         
         # Ensure the logs directory exists
         os.makedirs(logs_dir, exist_ok=True)
@@ -46,7 +47,7 @@ class PerformanceTracker:
         try:
             trade_data = trade_result['trade']
             log_entry = {
-                'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'pair': trade_data['pair'],
                 'action': trade_data['action'],
                 'volume': trade_data['volume'],
@@ -104,7 +105,7 @@ class PerformanceTracker:
 
             # Final log entry uses the unified total
             log_entry = {
-                'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'total_equity_usd': total_equity
             }
             
@@ -129,7 +130,7 @@ class PerformanceTracker:
         """
         try:
             with open(self.thesis_log_path, 'a', encoding='utf-8') as f:
-                timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
                 f.write(f"## Thesis for {timestamp}\n\n")
                 f.write(f"{new_thesis}\n\n")
                 f.write("---\n\n")
@@ -149,7 +150,7 @@ class PerformanceTracker:
             rejected_log_path = os.path.join(os.path.dirname(self.trades_log_path), "rejected_trades.csv")
             
             log_entry = {
-                'timestamp': datetime.now().replace(tzinfo=None).isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'requested_pair': trade.get('pair', 'N/A'),
                 'action': trade.get('action', 'N/A'),
                 'allocation_percentage': trade.get('allocation_percentage', trade.get('volume', 'N/A')),
@@ -171,3 +172,67 @@ class PerformanceTracker:
 
         except Exception as e:
             logger.error(f"Could not log rejected trade: {e}")
+
+    # New: daily P&L metrics based on equity curve
+    def log_daily_pnl(self):
+        try:
+            if not os.path.exists(self.equity_log_path):
+                logger.warning("P&L: equity.csv missing; skipping daily pnl logging")
+                return
+            eq = pd.read_csv(self.equity_log_path, names=['timestamp', 'total_equity_usd']) if not self._has_header(self.equity_log_path) else pd.read_csv(self.equity_log_path)
+            eq['timestamp'] = pd.to_datetime(eq['timestamp'], errors='coerce', utc=True)
+            eq['total_equity_usd'] = pd.to_numeric(eq['total_equity_usd'], errors='coerce')
+            eq = eq.dropna(subset=['timestamp', 'total_equity_usd'])
+            if eq.empty:
+                logger.warning("P&L: equity.csv has no valid rows")
+                return
+            eq['date'] = eq['timestamp'].dt.date
+            # Take last value per day
+            daily = eq.sort_values('timestamp').groupby('date').tail(1).copy()
+            daily['daily_return_pct'] = daily['total_equity_usd'].pct_change().fillna(0.0) * 100.0
+            # Rolling vol (percentage points) and simple Sharpe (assuming 0 RF), annualization ignored for simplicity in micro accounts
+            daily['rolling_vol_7d'] = daily['daily_return_pct'].rolling(window=7, min_periods=2).std().fillna(0.0)
+            daily['rolling_sharpe_30d'] = (
+                daily['daily_return_pct'].rolling(window=30, min_periods=2).mean().fillna(0.0) /
+                daily['daily_return_pct'].rolling(window=30, min_periods=2).std().replace(0, pd.NA)
+            ).fillna(0.0)
+            # Drawdown
+            daily['peak'] = daily['total_equity_usd'].cummax()
+            daily['drawdown_pct'] = (daily['total_equity_usd'] / daily['peak'] - 1.0) * 100.0
+            daily['max_drawdown_pct'] = daily['drawdown_pct'].cummin()
+            # Append/overwrite pnl.csv with latest full daily set
+            daily[['date','timestamp','total_equity_usd','daily_return_pct','rolling_vol_7d','rolling_sharpe_30d','drawdown_pct','max_drawdown_pct']].to_csv(
+                self.pnl_log_path,
+                index=False
+            )
+            logger.info(f"P&L: wrote {len(daily)} daily rows to {self.pnl_log_path}")
+        except Exception as e:
+            logger.error(f"P&L: failed to compute/write daily pnl: {e}")
+
+    def get_pnl_summary(self, days: int = 3) -> str:
+        try:
+            if not os.path.exists(self.pnl_log_path):
+                return "P&L summary unavailable (pnl.csv missing)."
+            df = pd.read_csv(self.pnl_log_path)
+            if df.empty:
+                return "P&L summary unavailable (no daily rows)."
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+            df = df.dropna(subset=['timestamp'])
+            recent = df.sort_values('timestamp').tail(days)
+            if recent.empty:
+                return "P&L summary unavailable (insufficient recent rows)."
+            ret = recent['daily_return_pct'].sum()
+            dd = float(recent['drawdown_pct'].min()) if 'drawdown_pct' in recent.columns else 0.0
+            sharpe = float(recent['rolling_sharpe_30d'].iloc[-1]) if 'rolling_sharpe_30d' in recent.columns else 0.0
+            return f"Last {len(recent)} days total return {ret:+.2f}pp, min drawdown {dd:.2f}pp, 30d Sharpe {sharpe:.2f}."
+        except Exception as e:
+            logger.warning(f"P&L summary failed: {e}")
+            return "P&L summary unavailable (error)."
+
+    def _has_header(self, path: str) -> bool:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                first = f.readline().lower()
+                return ("timestamp" in first and "," in first)
+        except Exception:
+            return False

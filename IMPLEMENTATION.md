@@ -28,13 +28,13 @@ The strategy is experimental, transparent, and performance-logged.
 - Status: ✅ PRODUCTION READY
 
 **🧠 REFLECTIVE INTELLIGENCE UPGRADE (August 11, 2025):** Historical Context & Self-Correction - IMPLEMENTED ✅
-- **Problem Solved:** 413 Request Entity Too Large from OpenAI due to oversized prompts (long cognitive transcripts + verbose context).
-- **Root Cause:** `<COGNITIVE_HISTORY>` injected raw transcripts; no holistic prompt-size budgeting across sections.
-- **Technical Solution:**
-  - **Reflection via Gemini 2.5 Pro:** `ReflectionAgent` now uses `gemini-2.5-pro` (1M context) to analyze long history and produce a compact JSON reflection. See `bot/gemini_client.py` and `bot/reflection_prompt_template.md`.
-  - **Lean Downstream Context:** Removed `<COGNITIVE_HISTORY>` from `bot/prompt_template.md`. Only the compact `historical_reflection` text is passed to `gpt-4o`.
-  - **Preflight Size Logs:** Added prompt-size logging (chars, est tokens) in `PromptEngine` and `TraderAgent` before API calls.
-- **Files Modified / Added:**
+- Problem Solved: 413 Request Entity Too Large from OpenAI due to oversized prompts (long cognitive transcripts + verbose context).
+- Root Cause: `<COGNITIVE_HISTORY>` injected raw transcripts; no holistic prompt-size budgeting across sections.
+- Technical Solution:
+  - Reflection via Gemini 2.5 Pro: `ReflectionAgent` now uses `gemini-2.5-pro` (1M context) to analyze long history and produce a compact JSON reflection. See `bot/gemini_client.py` and `bot/reflection_prompt_template.md`.
+  - Lean Downstream Context: Removed `<COGNITIVE_HISTORY>` from `bot/prompt_template.md`. Only the compact `historical_reflection` text is passed to `gpt-4o`.
+  - Preflight Size Logs: Added prompt-size logging (chars, est tokens) in `PromptEngine` and `TraderAgent` before API calls.
+- Files Modified / Added:
   - `agents/reflection_agent.py` (Gemini integration, bounded transcripts, compact output)
   - `bot/gemini_client.py` (NEW)
   - `bot/reflection_prompt_template.md` (NEW)
@@ -42,203 +42,48 @@ The strategy is experimental, transparent, and performance-logged.
   - `bot/prompt_engine.py` (removed `cognitive_history` arg; added size logs)
   - `agents/strategist_agent.py` (stopped passing `cognitive_history`)
   - `requirements.txt` (added `google-generativeai`)
-- **Impact:** Eliminates prompt bloat to OpenAI, while upgrading reflection quality via Gemini's 1M-token context. Trader prompts are leaner and more reliable.
-- **Config:** Set `GEMINI_API_KEY` env. Optional overrides: `GEMINI_REFLECTION_MODEL`, `GEMINI_TEMPERATURE`, `GEMINI_TOP_P`, `GEMINI_MAX_OUTPUT_TOKENS`.
-- **Status:** ✅ PRODUCTION READY
-
-**🛡️ ROBUSTNESS UPGRADE (August 2025):** Market Intelligence Pipeline - IMPLEMENTED ✅
-- **Problem Solved:** The bot was consistently failing to gather any relevant news headlines, causing the AI to operate without crucial market context and leading to poor decision-making quality.
-- **Root Cause Analysis:**
-  1.  **Stale RSS Feeds:** Many of the hardcoded RSS feed URLs in `bot/research_agent.py` were outdated or inactive, resulting in failed requests.
-  2.  **Aggressive Caching:** The caching logic was not correctly clearing itself between runs and was overly aggressive, incorrectly flagging new articles as duplicates.
-  3.  **Fragile Date Parsing:** The previous date parsing logic could not handle the variety of timestamp formats found across different RSS feeds.
-  4.  **Generic User-Agent:** Requests were being made with a default User-Agent, increasing the risk of being blocked by news source firewalls.
-- **Technical Solution:**
-  - **Overhauled RSS Feeds:** Conducted a web search to find and implement a new, verified list of high-quality crypto and macro news RSS feeds for 2025. Removed all dead links.
-  - **Intelligent Cache Control:** Refactored the `SupervisorAgent` to take explicit control over data freshness. It now passes a `bypass_cache=True` flag to the `AnalystAgent` at the start of every trading cycle and, critically, during refinement loops. This ensures the AI always has the freshest possible data.
-  - **Robust Date Parsing:** Replaced the fragile, format-specific date parsing with the `python-dateutil` library, which can intelligently parse almost any common date format.
-  - **Standardized User-Agent:** All RSS feed requests are now made with a standard browser User-Agent to maximize compatibility and avoid automated blocking.
-- **Files Modified:**
-  - `bot/research_agent.py`: Updated RSS feed list, integrated `dateutil` for parsing, and added a standard User-Agent to requests.
-  - `agents/supervisor_agent.py`: Implemented logic to control the `bypass_cache` flag for the `AnalystAgent`.
-  - `agents/analyst_agent.py`: Modified to correctly pass the `bypass_cache` flag down to the `ResearchAgent`.
-- **Impact:** The market intelligence pipeline is now significantly more resilient and reliable. The bot can successfully gather a rich set of fresh news headlines, providing the AI with the high-quality, real-time context it needs to make informed, intelligent trading decisions.
-- **Status:** ✅ PRODUCTION READY - The bot's ability to see and understand the market is fully restored.
-
-**🤖 AUTONOMY UPGRADE (August 9, 2025):** Refinement Loop Robustness - IMPLEMENTED ✅
-- **Problem Solved:** The refinement loop, designed to ask the AI for a better plan when its first one was invalid, was failing. The AI would often propose the same invalid trade again, causing the system to hit its `max_refinement_loops` limit and abort the trading cycle.
-- **Root Cause:**
-  1.  **Intelligence Starvation:** The `ResearchAgent`'s cache prevented it from re-processing recent news when the refinement loop was triggered just seconds after the initial run. The AI was being asked for a new plan without any new information.
-  2.  **Insufficiently Specific Query:** The Supervisor's request for a new plan was too generic. It didn't explain *why* the previous plan was rejected, making it hard for the AI to correct its mistake.
-  3.  **"Impossible Puzzle" Constraint:** The AI lacked a clear instruction on what to do if its highest-conviction trade was mathematically impossible to execute for a small portfolio due to minimum order sizes.
-- **Technical Solution:**
-  - **Cache Bypass for Refinement:** Implemented a `bypass_cache` flag in the `ResearchAgent`. The `SupervisorAgent` now sets this to `True` during a refinement loop, forcing the agent to re-fetch and re-process all recent news, ensuring the AI has fresh context for its second attempt.
-  - **Enhanced Refinement Query:** The `SupervisorAgent` now constructs a much more specific query when a trade fails volume validation. It includes the exact numbers (e.g., "Your plan for XRP failed: calculated volume 1.33, minimum required 2.0") and explicitly instructs the AI to find a *different* asset or increase the allocation.
-  - **Explicit "Escape Hatch" in Prompt:** Added a new constraint to `bot/prompt_template.md` that acts as an "escape hatch." It explicitly tells the AI: if your best idea is impossible to execute due to minimums, you MUST discard it and move to your second-best idea.
-- **Files Modified:**
-  - `agents/supervisor_agent.py`: Upgraded the refinement query logic.
-  - `agents/analyst_agent.py`: Modified to pass the `bypass_cache` flag.
-  - `bot/research_agent.py`: Implemented the `bypass_cache` functionality.
-  - `bot/prompt_template.md`: Added the new "Escape Hatch" constraint.
-- **Impact:** The refinement loop is now a genuinely effective self-correction mechanism. The AI receives both fresh intelligence and highly specific feedback on its errors, dramatically increasing the probability that its second attempt will be valid and executable. This makes the entire system more resilient and autonomous.
-- **Status:** ✅ PRODUCTION READY - The bot's self-correction capabilities are now significantly more robust.
-
-**🛡️ ARCHITECTURE UPGRADE (August 10, 2025):** Supervisor Fallback & Enhanced Logging - IMPLEMENTED ✅
-- **Problem Solved:** When the AI failed to produce a valid trading plan after exhausting its refinement loops, the entire trading cycle would abort. Furthermore, the logs did not clearly state *why* a plan was initially rejected, making debugging difficult.
-- **Root Cause:**
-  1.  **No Graceful Failure:** The system lacked a "circuit breaker" or a safe fallback state if the AI could not self-correct.
-  2.  **Insufficient Observability:** The rejection reasons were not explicitly logged, hiding the root cause of the refinement loop from the operator.
-- **Technical Solution:**
-  - **Enhanced Rejection Logging:** Modified `SupervisorAgent._execute_pipeline_loop` to explicitly log the `approval_reason` from the `final_decision` object at the moment a plan is rejected. This makes the reason for each refinement attempt clear in the console output.
-  - **Refinement Query Logging:** Added logging to display the exact `refinement_query` sent to the `AnalystAgent`, providing transparency into the self-correction attempt.
-  - **Defensive Holding Fallback:** Implemented a new "circuit breaker" in the `SupervisorAgent`. If the `max_refinement_loops` limit is reached, instead of aborting, the Supervisor now:
-    1.  Logs that it is activating a fallback.
-    2.  Generates a safe, empty trading plan (`{"trades": [], "strategy": "DEFENSIVE_HOLDING", ...}`).
-    3.  Creates a detailed `thesis` explaining *why* it is holding (e.g., "AI failed to generate a valid plan... last rejection reason was: 'Volume below minimum...'").
-    4.  Approves this safe plan, allowing the trading cycle to complete successfully and log the informative thesis.
-- **Files Modified:**
-  - `agents/supervisor_agent.py`: Implemented the new logging and fallback logic in the main pipeline loop.
-- **Impact:** The system is now significantly more resilient and transparent. It can no longer fail due to an inability to generate a valid plan. Instead, it gracefully defaults to a safe state and provides a clear, auditable log of the entire decision-making process, including the specific reasons for failure. This makes the bot more reliable for unattended operation.
-- **Status:** ✅ PRODUCTION READY - The bot is now equipped with a critical safety feature and enhanced observability.
-
-**🛡️ ARCHITECTURE UPGRADE (August 8, 2025):** Supervisor Pre-Execution Validation & Rejected Trade Feedback Loop - IMPLEMENTED ✅
-- **Problem Solved:** The AI was generating trades that failed at the execution stage because they violated Kraken's minimum order size rules. The system would gracefully handle the failure but could not learn from its mistake or prevent it from happening again.
-- **Root Cause:**
-  1.  **Delayed Validation:** The Supervisor-AI approved trading plans without pre-validating if the calculated trade volumes would be valid, leaving the final check to the `TradeExecutor` which was too late in the process.
-  2.  **Lack of Consequence Awareness:** The AI had no feedback mechanism to learn that its proposed trades were being rejected for specific rule violations. The performance review only focused on the PnL of executed trades.
-- **Technical Solution (Phase 1 - Supervisor Pre-Execution Validation):**
-  - **Enhanced Validation Logic:** Modified `SupervisorAgent._validate_trading_plan` to perform a "dry run" calculation. For each trade, it now uses live portfolio value and asset prices to calculate the expected volume.
-  - **Proactive Failure Detection:** This calculated volume is checked against the `ordermin` value fetched from the Kraken API for that specific pair. If it's too small, the trade is flagged as a `validation_issue`.
-  - **Dynamic Refinement Trigger:** Upgraded `SupervisorAgent._should_refine_strategy` to intelligently trigger the refinement loop for these specific, actionable validation failures. The Supervisor now generates a targeted query (e.g., "Find an alternative trade, the last one was too small") and re-tasks the `AnalystAgent`.
-- **Technical Solution (Phase 2 - Rejected Trade Feedback Loop):**
-  - **Rejected Trade Context:** Created a new `_gather_rejected_trades_context` method in `StrategistAgent` that reads `logs/rejected_trades.csv` and creates a summary of recently failed trade proposals.
-  - **Prompt Injection:** Added a new `<REJECTED_TRADES_REVIEW>` section to `bot/prompt_template.md`. The `PromptEngine` now injects this feedback directly into the AI's context, forcing it to acknowledge and learn from its past validation failures.
-- **Files Modified:**
-  - `agents/supervisor_agent.py`: Implemented the pre-execution volume validation logic and enhanced the refinement trigger.
-  - `agents/strategist_agent.py`: Added logic to read and process `rejected_trades.csv` for the new feedback loop.
-  - `bot/prompt_template.md`: Added the new `<REJECTED_TRADES_REVIEW>` section.
-  - `bot/prompt_engine.py`: Updated to handle the new `rejected_trades_review` parameter.
-- **Impact:** The system is now significantly more robust and intelligent. The Supervisor acts as a stronger gatekeeper, preventing invalid plans from reaching the execution stage. More importantly, the AI now has a closed feedback loop for *all* types of failures (not just unprofitable trades), allowing it to learn from its mistakes and generate progressively better trading strategies over time.
-- **Status:** ✅ PRODUCTION READY - The bot is now a more resilient, self-correcting agent.
-
-**🤖 AUTONOMY UPGRADE (August 7, 2025):** Performance Feedback & Continuous Monitoring - IMPLEMENTED ✅
-- **Problem Solved:** The bot was reactive, only operating on a fixed daily schedule. It could not learn from its past trade performance or react to market events between cycles, limiting its autonomy and profitability.
-- **Root Cause:** The system was designed as a simple scheduler, not a persistent, proactive agent. It lacked a mechanism to analyze its own performance or monitor the market for event-driven triggers.
-- **Technical Solution (Phase 1 - Performance Feedback):**
-  - **Performance Analysis:** Created a new `_analyze_last_trade_cycle` method in `agents/strategist_agent.py`. This function reads `trades.csv` and `equity.csv` to calculate the PnL of the trades executed since the last thesis.
-  - **Feedback Injection:** The `PromptEngine` was upgraded to inject this data-driven performance summary directly into the `<PERFORMANCE_REVIEW>` section of the AI's prompt, forcing it to consider the outcome of its previous strategy.
-- **Technical Solution (Phase 2 - Continuous Monitoring):**
-  - **Persistent Agent Loop:** Refactored `scheduler_multiagent.py` to run a continuous `while True` loop, transforming it from a simple scheduler into an always-on agent.
-  - **Lightweight Monitoring:** Implemented a new `monitor_market()` function that runs every minute to perform high-frequency, low-cost checks for market anomalies.
-  - **Event-Driven Triggers:** The architecture now supports triggering the full, resource-intensive trading cycle based on events (e.g., high volatility, breaking news), in addition to the daily schedule.
-- **Files Modified:**
-  - `agents/strategist_agent.py`: Added the performance analysis capability.
-  - `bot/prompt_engine.py`: Integrated the live performance feedback into the prompt-building process.
-  - `scheduler_multiagent.py`: Major refactoring to create the continuous monitoring and event-driven architecture.
-- **Impact:** The bot is now a truly autonomous agent. It learns from its actions (closing the performance loop) and can proactively respond to market opportunities and threats 24/7, significantly enhancing its potential for alpha generation and risk management.
-- **Status:** ✅ PRODUCTION READY - The bot now operates as a persistent, learning agent.
-
-**🚀 ARCHITECTURE UPGRADE (August 6, 2025):** Dynamic Supervisor & Strategy Refinement Loop - IMPLEMENTED ✅
-- **Problem Solved:** The previous multi-agent system was a rigid, linear pipeline. A low-quality market analysis or a low-confidence trading plan would proceed without challenge, or at best, halt the entire cycle.
-- **Root Cause:** The Supervisor-AI acted as a simple pipeline manager, not an active orchestrator. It lacked the ability to reason about uncertainty, request clarification, or ask for a revised strategy.
-- **Technical Solution:**
-  - **State-Driven Loop:** Refactored `SupervisorAgent._execute_pipeline` into `_execute_pipeline_loop`, transforming the architecture from a fixed sequence into a dynamic, state-driven loop.
-  - **Quality Gates:** Implemented a `_should_refine_strategy` method that acts as a "quality gate" after the `Trader-AI` generates a plan. It checks for low confidence scores, high risk, or failed validation.
-  - **Dynamic Task Delegation:** If a plan is rejected, the Supervisor now dynamically creates a new, targeted research query (e.g., "Deep dive on XRP liquidity") using `_create_refinement_query`.
-  - **Iterative Refinement:** The Supervisor re-tasks the `AnalystAgent` with the specific query. The `AnalystAgent` and `ResearchAgent` were enhanced to accept these custom queries, overriding default keyword searches. The new, richer context is then fed back into the `Strategist-AI` to generate a revised, hopefully better, trading plan.
-  - **Safety Mechanism:** A `max_refinement_loops` parameter was introduced to prevent infinite loops, ensuring the cycle terminates even if the AI cannot produce a satisfactory plan.
-- **Files Modified:**
-  - `agents/supervisor_agent.py`: Major refactoring to implement the state-driven loop, quality gates, and dynamic task delegation logic.
-  - `agents/analyst_agent.py`: Modified `execute` method to accept and process dynamic `research_focus` queries from the supervisor.
-  - `bot/research_agent.py`: Upgraded `generate_daily_report` to handle `custom_query` overrides for targeted news fetching.
-- **Impact:** The trading bot is now significantly more robust and intelligent. It can reason about uncertainty, actively seek to improve its own understanding before acting, and is less likely to execute trades based on low-quality information. This moves the system from simple automation to a more advanced, cognitive agentic architecture.
-- **Status:** ✅ PRODUCTION READY - The Supervisor is now a true dynamic orchestrator.
-
-**�� CRITICAL BUG FIX (August 5, 2025):** Research Agent Data Flow Fix - RESOLVED ✅
-- **Problem Solved:** Daily research reports showing "Market analysis unavailable - no live news data could be gathered" despite successful news fetching
-- **Root Cause:** Duplicate RSS fetching within same execution cycle causing cache conflicts and empty headlines for AI analysis
-- **Technical Solution:** Refactored `ResearchAgent._fetch_market_summary()` to accept pre-fetched headlines as parameters instead of re-fetching
-- **Files Modified:**
-  - `bot/research_agent.py` - Enhanced method signatures and data flow to prevent duplicate fetching
-  - Improved variable scoping and exception handling for headline collections
-- **Reliability Improvements:**
-  - Removed failing RSS feed (`cryptorank.io/news/feed`) that consistently caused parsing errors
-  - Enhanced error handling with proper fallback for empty headline collections
-  - Improved feed reliability from 11/12 to 11/11 successful crypto feeds
-- **Impact:** Market intelligence quality upgraded from "fair" to "excellent" with comprehensive AI-generated analysis
-- **Validation:** Full end-to-end testing confirmed proper AI market analysis generation and successful trade execution
-- **Status:** ✅ PRODUCTION READY - Research Agent now generates institutional-grade market intelligence reliably
-
-**🔧 CRITICAL BUG FIX (August 5, 2025):** Trader Agent Validation Fix - RESOLVED ✅
-- **Problem Solved:** "Trade 1: sell allocation_percentage must be between 1% and 100%, got 0.0%" validation error preventing trade execution
-- **Root Cause:** Dust positions (e.g., $0.004 worth of SUI = 0.0% allocation) were included in portfolio context, AI attempted to sell exactly 0.0%
-- **Technical Solution:** Enhanced portfolio filtering in `bot/kraken_api.py` to exclude positions < $0.01 value and < 0.05% allocation
-- **Files Modified:**
-  - `bot/kraken_api.py` - Added dust position filtering in `get_comprehensive_portfolio_context()`
-  - `agents/trader_agent.py` - Added 0% trade handling to skip instead of error on negligible allocations
-- **Validation Enhancement:** 
-  - Positions like "SUI: 0.001190 (Value: $0.00 @ $3.37) [0.0% of portfolio]" now filtered from AI context
-  - Added fallback handling for any remaining 0.0% trades to prevent validation failures
-- **Impact:** Restored multi-agent trading pipeline reliability and eliminated validation-related trading failures
-- **Status:** ✅ PRODUCTION READY - Multi-agent system now handles dust positions gracefully
-
-**🔧 ROBUSTNESS ENHANCEMENT (August 5, 2025):** Smart Order Size Management - IMPLEMENTED ✅
-- **Enhancement:** Intelligent minimum order size awareness to prevent allocation failures
-- **Dynamic Warnings:** AI now receives portfolio-size-specific minimum order alerts (e.g., "XRP requires 60.8% of your $9.87 portfolio")
-- **Improved Error Reporting:** Fixed pair name inconsistencies in rejection messages (XRPUSD vs XXRPZUSD)
-- **Enhanced Logging:** Added detailed context for rejected trades with allocation percentages and reasoning
-- **Files Modified:**
-  - `agents/strategist_agent.py` - Added dynamic minimum order size warnings based on current portfolio value
-  - `bot/trade_executor.py` - Improved error message consistency for pair name reporting
-  - `agents/supervisor_agent.py` - Enhanced logging for rejected trades with allocation context
-- **Smart Prevention:** AI now knows that XRP minimum order (~$6.00) represents 60.8% of a $9.87 portfolio
-- **Impact:** Reduces failed trades due to minimum order size violations through proactive AI awareness
-- **Status:** ✅ PRODUCTION READY - Enhanced decision-making intelligence for small portfolio management
-
-**Key Improvements:**
-- **CoinGecko Integration:** Live price data, trending analysis, and market metrics for 10 tracked cryptocurrencies
-- **Enhanced Keyword Intelligence:** 57 crypto + 81 macro keywords capturing ETFs, institutional flows, Fed policy, and regulatory developments
-- **OpenAI 2025 Best Practices:** Professional prompt optimization with role definition, task specificity, and institutional output format
-- **Multi-Source Intelligence:** Combines quantitative CoinGecko data with qualitative news analysis for superior market context
-- **Comprehensive Coverage:** Now captures BlackRock ETF flows, MicroStrategy moves, Fed decisions, GENIUS/CLARITY Act developments, and macro trends
-- **Professional Analysis:** Institutional morning briefing format with confidence levels and specific trading opportunities
-- **🔧 OpenAI API Structure Fix:** Implemented proper system/user message separation across all agents for optimal AI performance and cost efficiency
-- **🎯 Research Agent Reliability:** Fixed duplicate fetching bug ensuring consistent market analysis generation
-
-**🔧 DATA INTEGRITY FIX (August 12, 2025):** Equity Calculation, Refinement Freshness, and Timestamp Hardening — IMPLEMENTED ✅
-- Problem Solved: Incorrect equity logging (e.g., ETH.F priced as $0, equity logged as only cash), ineffective refinement repeating the same invalid plan, and Pandas timestamp parsing warnings.
-- Root Causes:
-  1. `performance_tracker.py` duplicated fragile valuation logic and didn't normalize symbols/dust like `KrakenAPI.get_comprehensive_portfolio_context()`.
-  2. Refinement loop reused cached research even for "Volume below minimum" failures, so Trader kept proposing the same invalid trade.
-  3. Timestamp parsing relied on inference, triggering warnings and potential inconsistencies.
-- Technical Solutions:
-  - Unified Equity Source of Truth: `PerformanceTracker.log_equity()` now uses `KrakenAPI.get_comprehensive_portfolio_context()` (normalizes symbols like ETH.F, filters dust, values all assets) and logs top holdings for verification.
-  - Refinement Freshness Rule: Supervisor forces `bypass_cache=True` for Analyst when validation issues include "Volume below minimum", ensuring fresh inputs before the next strategy attempt.
-  - Timestamp Hardening: Explicit `format='ISO8601'` in `StrategistAgent` for equity/trades parsing to remove warnings and standardize UTC handling.
-- Files Modified:
-  - `bot/performance_tracker.py`
-  - `agents/supervisor_agent.py`
-  - `agents/strategist_agent.py`
-- Impact: Accurate equity curve for performance feedback, effective refinement that changes inputs when volume minimums block execution, and cleaner logs with robust date parsing.
+- Impact: Eliminates prompt bloat to OpenAI, while upgrading reflection quality via Gemini's 1M-token context. Trader prompts are leaner and more reliable.
+- Config: Set `GEMINI_API_KEY` env. Optional overrides: `GEMINI_REFLECTION_MODEL`, `GEMINI_TEMPERATURE`, `GEMINI_TOP_P`, `GEMINI_MAX_OUTPUT_TOKENS`.
 - Status: ✅ PRODUCTION READY
 
-**🛡️ ARCHITECTURE REFACTOR (August 12, 2025):** Unified Portfolio Valuation Logic — IMPLEMENTED ✅
-- **Problem Solved:** Critical self-correction failures and corrupted logs caused by inconsistent portfolio valuation. The refinement loop was failing because the Supervisor was giving the AI bad data (e.g., portfolio value of "$0.41" instead of "~$9.00").
-- **Root Cause:** A clear violation of the DRY (Don't Repeat Yourself) principle. The `SupervisorAgent` had its own outdated and buggy `_get_portfolio_value` method that failed to handle special asset names (like `ETH.F`), creating a second, unreliable source of truth for portfolio valuation that conflicted with the canonical `KrakenAPI` method.
-- **Technical Solution:**
-  - **Single Source of Truth:** Eliminated the redundant `_get_portfolio_value` method from `SupervisorAgent`.
-  - **Centralized Logic:** All parts of the `SupervisorAgent` that require portfolio value now call the canonical `self.kraken_api.get_comprehensive_portfolio_context()` method, which is already proven to be robust.
-- **Files Modified:**
-  - `agents/supervisor_agent.py`: Deleted the local `_get_portfolio_value` method and updated all internal calls to use the `KrakenAPI`'s canonical method.
-- **Impact:** The entire system now operates with a single, consistent, and accurate understanding of the portfolio's state. This fixes the corrupted self-correction feedback loop, ensures accurate validation, and improves overall system stability and reliability.
-- **Status:** ✅ PRODUCTION READY - The bot's core architecture is now more robust and less prone to data integrity issues.
+**🧩 REFLECTION CONTEXT EXPANSION (August 12, 2025) — IMPLEMENTED ✅**
+- Problem: Reflection-AI lacked the raw data context needed for accurate self-diagnosis and execution guardrails.
+- Solution: Enriched `ReflectionAgent` inputs with bounded raw snippets of equity, trades, and the latest daily research, with size-aware preflight and caching.
+- Details:
+  - Template (`bot/reflection_prompt_template.md`) now includes:
+    - `{equity_raw_block}`: last N rows from `logs/equity.csv`
+    - `{trades_raw_block}`: last N rows from `logs/trades.csv`
+    - `{latest_research_block}`: tail-truncated `logs/daily_research_report.md`
+  - ReflectionAgent additions:
+    - Env toggles: `REFLECTION_INCLUDE_EQUITY_RAW=1`, `REFLECTION_INCLUDE_TRADES_RAW=1`, `REFLECTION_INCLUDE_RESEARCH_REPORT=1`
+    - Size controls: `REFLECTION_MAX_CSV_ROWS=200`, `REFLECTION_MAX_RESEARCH_CHARS=5000`
+    - Token budgeting: warn at `REFLECTION_WARN_TOKENS` (default 24k), clamp at `REFLECTION_CLAMP_TOKENS` (default 50k) by halving CSV rows and research chars
+    - Provenance logs: rows included, time ranges, research mtime/Generated header, per-block token counts, total tokens
+    - Cache key extended to include SHA256 of raw blocks to prevent stale reuse
+    - Optional freshness: supervisor may pass `latest_research_override` (in-memory report) to bypass file staleness
+- Impact: GPT‑5 receives ground-truth raw context alongside summaries, improving accuracy of patterns/guardrails and reducing hallucinations about execution issues.
+- Files Changed:
+  - `agents/reflection_agent.py`
+  - `bot/reflection_prompt_template.md`
+- Status: ✅ PRODUCTION READY
+
+**📈 P&L TRACKER (August 12, 2025) — IMPLEMENTED ✅**
+- Objective: Provide daily P&L metrics for monitoring and to feed concise summaries into agents.
+- Implementation (`bot/performance_tracker.py`):
+  - New CSV: `logs/pnl.csv` with columns `date,timestamp,total_equity_usd,daily_return_pct,rolling_vol_7d,rolling_sharpe_30d,drawdown_pct,max_drawdown_pct`
+  - New methods:
+    - `log_daily_pnl()`: builds daily series from `equity.csv`, computes returns/vol/sharpe/drawdowns
+    - `get_pnl_summary(days=3) -> str`: quick textual summary for reflection/strategist
+  - UTC-safe timestamps, robust type coercion, and graceful fallbacks
+- Usage: call after equity logging or at end-of-run summary step
+- Status: ✅ PRODUCTION READY
 
 ---
 
 ## 🗓️ Start Date
 
 **July 30, 2025**
-Initial balance: **\$100.00 USDC**
+Initial balance: **$100.00 USDC**
 
 ---
 
