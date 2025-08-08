@@ -365,7 +365,7 @@ def main():
                         logger.info("")
                         logger.info("🏦 CURRENT LIVE PORTFOLIO:")
                         try:
-                            kraken_api = KrakenAPI()
+                            # --- FIX: Re-use the single, shared kraken_api instance ---
                             portfolio_data = kraken_api.get_comprehensive_portfolio_context()
                             
                             logger.info(f"   💰 Live total equity: ${portfolio_data['total_equity']:,.2f}")
@@ -396,7 +396,7 @@ def main():
                     logger.info("")
                     logger.info("🏦 DETAILED PORTFOLIO STATUS...")
                     try:
-                        kraken_api = KrakenAPI()
+                        # --- FIX: Re-use the single, shared kraken_api instance ---
                         portfolio_data = kraken_api.get_comprehensive_portfolio_context()
                         
                         logger.info(f"   💰 Total Portfolio Value: ${portfolio_data['total_equity']:,.2f}")

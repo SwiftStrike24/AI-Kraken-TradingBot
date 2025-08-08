@@ -13,7 +13,7 @@ that plague decentralized agent approaches.
 import os
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from enum import Enum
 
@@ -776,6 +776,35 @@ class SupervisorAgent(BaseAgent):
         # --- PHASE 1 ENHANCEMENT: Pre-Execution Volume Validation ---
         # Get portfolio value once for all calculations
         portfolio_value = self._get_portfolio_value()
+        # Live context for cash and holdings
+        try:
+            _ctx = self.kraken_api.get_comprehensive_portfolio_context()
+            live_cash_balance = float(_ctx.get('cash_balance', 0.0))
+            live_raw_balances = _ctx.get('raw_balances', {})
+        except Exception:
+            live_cash_balance = 0.0
+            live_raw_balances = {}
+        # Estimate sell proceeds in USD to approximate available cash post-sells
+        expected_sell_proceeds_usd = 0.0
+        try:
+            for t in trading_plan.get('trades', []):
+                if t.get('action') == 'sell' and 'allocation_percentage' in t:
+                    normalized_pair = self._normalize_pair(t.get('pair', ''))
+                    if not normalized_pair:
+                        continue
+                    pair_details = self.kraken_api.get_pair_details(normalized_pair) or {}
+                    base_asset = pair_details.get('base', '')
+                    if base_asset.startswith(('X','Z')) and len(base_asset) > 1:
+                        base_asset = base_asset[1:]
+                    holding_amt = float(live_raw_balances.get(base_asset, 0.0))
+                    alloc = float(t.get('allocation_percentage', 0.0))
+                    try:
+                        px = self.kraken_api.get_ticker_prices([normalized_pair]).get(normalized_pair, {}).get('price', 0)
+                    except Exception:
+                        px = 0
+                    expected_sell_proceeds_usd += max(0.0, holding_amt * alloc * px)
+        except Exception:
+            expected_sell_proceeds_usd = expected_sell_proceeds_usd
 
         # Check 5: Confidence-based validation for new percentage trades
         for i, trade in enumerate(trades):
@@ -823,34 +852,49 @@ class SupervisorAgent(BaseAgent):
                     if not normalized_pair:
                         validation_issues.append(f"Trade {i+1}: Invalid or unknown pair '{trade.get('pair')}'")
                         continue
-
+ 
                     pair_details = self.kraken_api.get_pair_details(normalized_pair)
                     if not pair_details:
                         validation_issues.append(f"Trade {i+1}: Could not fetch trading rules for pair '{normalized_pair}'")
                         continue
-                    
+                     
                     min_volume = float(pair_details.get('ordermin', 0))
                     costmin = float(pair_details.get('costmin', 0) or 0.0)
-                    
-                    # Calculate expected volume from allocation
-                    if trade.get('action') == 'sell':
-                        # For sells, the volume is based on the existing holding's value
-                        base_asset_clean = pair_details.get('base', '')
-                        if base_asset_clean.startswith(('X', 'Z')) and len(base_asset_clean) > 1:
-                            base_asset_clean = base_asset_clean[1:]
-
-                        portfolio_context = self.kraken_api.get_comprehensive_portfolio_context()
-                        holding_amount = portfolio_context['raw_balances'].get(base_asset_clean, 0.0)
-                        calculated_volume = holding_amount * allocation
-                    else: # buy
+                     
+                    # Calculate expected volume from allocation, treating buys and sells consistently
+                    try:
                         prices = self.kraken_api.get_ticker_prices([normalized_pair])
+                        if not prices or normalized_pair not in prices:
+                            validation_warnings.append(f"Could not get price for {trade.get('pair')}, skipping volume validation.")
+                            continue
                         current_price = prices[normalized_pair]['price']
                         usd_amount = portfolio_value * allocation
                         calculated_volume = usd_amount / current_price if current_price > 0 else 0
+                    except Exception as e:
+                        validation_warnings.append(f"Could not calculate volume for {trade.get('pair')}: {e}")
+                        continue # Skip validation for this trade if price is unavailable
 
                     if calculated_volume < min_volume:
-                        validation_issues.append(f"Trade {i+1}: Volume below minimum. Calculated {calculated_volume:.8f}, requires {min_volume:.8f} for {trade.get('pair')}")
-
+                        # Determine if this BUY can be auto-uplifted at execution given post-sell cash
+                        if trade.get('action') == 'buy':
+                            try:
+                                prices = self.kraken_api.get_ticker_prices([normalized_pair])
+                                price_for_min = prices.get(normalized_pair, {}).get('price', 0)
+                            except Exception:
+                                price_for_min = 0
+                            required_usd = max(costmin, min_volume * price_for_min if price_for_min else 0.0)
+                            cap_pct = 0.95 if portfolio_value < 50 else 0.40
+                            cap_usd = cap_pct * portfolio_value
+                            effective_available = live_cash_balance + expected_sell_proceeds_usd
+                            if required_usd > 0 and required_usd <= cap_usd * 1.001 and required_usd <= effective_available * 1.001:
+                                validation_warnings.append(
+                                    f"Trade {i+1}: Volume below minimum but upliftable at execution to ordermin {min_volume:.8f} given available funds"
+                                )
+                            else:
+                                validation_issues.append(f"Trade {i+1}: Volume below minimum. Calculated {calculated_volume:.8f}, requires {min_volume:.8f} for {trade.get('pair')}")
+                        else:
+                            validation_issues.append(f"Trade {i+1}: Volume below minimum. Calculated {calculated_volume:.8f}, requires {min_volume:.8f} for {trade.get('pair')}")
+ 
                     # Effective USD minimum check using live price
                     try:
                         prices = self.kraken_api.get_ticker_prices([normalized_pair])
@@ -858,9 +902,24 @@ class SupervisorAgent(BaseAgent):
                         trade_usd_value = calculated_volume * price_for_min if price_for_min else 0.0
                         effective_min_usd = max(costmin, min_volume * price_for_min if price_for_min else 0.0)
                         if effective_min_usd > 0 and trade_usd_value < effective_min_usd:
-                            validation_issues.append(
-                                f"Trade {i+1}: USD value below effective minimum. Calculated ${trade_usd_value:.2f}, requires ${effective_min_usd:.2f} for {trade.get('pair')}"
-                            )
+                            # same uplift tolerance as above
+                            if trade.get('action') == 'buy':
+                                required_usd = effective_min_usd
+                                cap_pct = 0.95 if portfolio_value < 50 else 0.40
+                                cap_usd = cap_pct * portfolio_value
+                                effective_available = live_cash_balance + expected_sell_proceeds_usd
+                                if required_usd <= cap_usd * 1.001 and required_usd <= effective_available * 1.001:
+                                    validation_warnings.append(
+                                        f"Trade {i+1}: USD notional below minimum but upliftable at execution to ${required_usd:.2f}"
+                                    )
+                                else:
+                                    validation_issues.append(
+                                        f"Trade {i+1}: USD value below effective minimum. Calculated ${trade_usd_value:.2f}, requires ${effective_min_usd:.2f} for {trade.get('pair')}"
+                                    )
+                            else:
+                                validation_issues.append(
+                                    f"Trade {i+1}: USD value below effective minimum. Calculated ${trade_usd_value:.2f}, requires ${effective_min_usd:.2f} for {trade.get('pair')}"
+                                )
                     except Exception:
                         pass
  

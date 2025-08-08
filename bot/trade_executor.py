@@ -65,7 +65,7 @@ class TradeExecutor:
             if hasattr(self.kraken_api, 'asset_to_usd_pair_map'):
                 if base_asset in self.kraken_api.asset_to_usd_pair_map:
                     return self.kraken_api.asset_to_usd_pair_map[base_asset]
-                    
+                
                 # Also try with common Kraken prefixes
                 for prefix in ['X', 'Z', '']:
                     prefixed_asset = prefix + base_asset if prefix else base_asset
@@ -131,15 +131,15 @@ class TradeExecutor:
             
             # Check for precision mismatch and adjust if necessary
             if current_balance < volume:
-                # If the difference is very small, adjust the volume to match the balance
-                if abs(current_balance - volume) / volume < 0.01: # 1% tolerance
-                    adjusted_volume = current_balance
-                    logger.warning(f"Adjusting sell order for {clean_base_asset} from {volume:.8f} to {adjusted_volume:.8f} to match available balance.")
-                    adjusted_trade = trade.copy()
-                    adjusted_trade['volume'] = adjusted_volume
-                    return True, f"Adjusted sell order for {clean_base_asset} to match balance", adjusted_trade
-                else:
+                # Cap to available balance (sell-all semantics if AI overspecifies)
+                adjusted_volume = max(0.0, current_balance)
+                adjusted_volume = self._round_volume_for_pair(pair, adjusted_volume)
+                if adjusted_volume <= 0.0:
                     return False, f"Insufficient {clean_base_asset} balance. Have: {current_balance:.6f}, Need: {volume:.6f}", trade
+                logger.warning(f"Capping sell order for {clean_base_asset} from {volume:.8f} to {adjusted_volume:.8f} (available balance).")
+                adjusted_trade = trade.copy()
+                adjusted_trade['volume'] = adjusted_volume
+                return True, f"Capped sell order for {clean_base_asset} to available balance", adjusted_trade
             
             return True, f"Sufficient {clean_base_asset} balance: {current_balance:.6f} >= {volume:.6f}", trade
             
@@ -270,13 +270,31 @@ class TradeExecutor:
         buy_trades = [t for t in all_trades if t.get('action', '').lower() == 'buy']
 
         # --- Phase 1: Execute Sell Orders First ---
+        sell_txids: list[str] = []
         if sell_trades:
             logger.info(f"🔥 Phase 1: Executing {len(sell_trades)} SELL order(s) to free up capital...")
             sell_results = self._process_trades(sell_trades, 'sell')
             results.extend(sell_results)
+            # Collect txids for successful sells
+            for r in sell_results:
+                if r.get('status') == 'success' and r.get('txid'):
+                    sell_txids.append(r['txid'])
+            if sell_txids:
+                logger.info(f"Waiting for {len(sell_txids)} sell order(s) to close before buying...")
+                final_status = self.kraken_api.wait_for_orders_closed(sell_txids, timeout_seconds=60, poll_interval=2.0)
+                logger.info(f"Sell order final statuses: {final_status}")
+            else:
+                logger.info("No successful sell txids to wait on.")
         else:
             logger.info("Phase 1: No SELL orders to execute.")
 
+        # Refresh balances after sells regardless of status to reflect any partial/closed orders
+        try:
+            portfolio_after_sells = self.kraken_api.get_comprehensive_portfolio_context()
+            logger.info(f"Post-sell balances: Cash ${portfolio_after_sells.get('cash_balance', 0):,.2f}")
+        except Exception:
+            logger.warning("Failed to refresh portfolio after sells; proceeding with buy validation using live queries")
+        
         # --- Phase 2: Execute Buy Orders ---
         if buy_trades:
             logger.info(f"💰 Phase 2: Executing {len(buy_trades)} BUY order(s) with available capital...")
@@ -308,6 +326,16 @@ class TradeExecutor:
         portfolio_value = self._calculate_portfolio_value()
         portfolio_data = self.kraken_api.get_comprehensive_portfolio_context()
         logger.info(f"🏦 Portfolio Status for {trade_type.upper()}s: Total Value ${portfolio_value:,.2f}, Cash ${portfolio_data['cash_balance']:,.2f}")
+
+        # For BUY validation, reserve cash progressively to avoid oversubscription within the same batch
+        reserved_cash = 0.0
+        available_cash_live = 0.0
+        if trade_type == 'buy':
+            try:
+                available_cash_live = float(self.kraken_api.get_comprehensive_portfolio_context().get('cash_balance', 0.0))
+            except Exception:
+                available_cash_live = float(portfolio_data.get('cash_balance', 0.0))
+            logger.info(f"Available cash for BUY reservations: ${available_cash_live:,.2f}")
 
         for trade in trades_to_process:
             try:
@@ -361,6 +389,19 @@ class TradeExecutor:
                 # LOG PORTFOLIO IMPACT
                 self._log_portfolio_impact(trade_to_validate, portfolio_data)
                 
+                # Dynamic preflight against Kraken (validate=true) to catch unsupported/restricted pairs
+                is_ok, not_reason = self.kraken_api.is_pair_tradeable(pair, action, volume)
+                if not is_ok:
+                    logger.warning(f"Skipping {action.upper()} {pair}: not tradeable for this account/region. Reason: {not_reason}")
+                    results.append({
+                        'pair': pair,
+                        'action': action,
+                        'volume': float(volume) if volume is not None else None,
+                        'status': 'skipped_not_tradeable',
+                        'reason': not_reason,
+                    })
+                    continue
+
                 # PRE-VALIDATION: Check minimum order size and effective cost minimum
                 pair_details = self.kraken_api.get_pair_details(pair)
                 if pair_details:
@@ -373,14 +414,40 @@ class TradeExecutor:
                     except Exception:
                         price = trade_to_validate.get('estimated_price', 0) or 0
                     
-                    # Units minimum check (ordermin)
+                    # Units minimum check (ordermin) with optional uplift for BUY
                     if volume < ordermin:
                         original_pair = trade.get('pair', pair)
-                        error_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {pair}"
-                        user_friendly_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {original_pair}"
-                        logger.warning(f"⚠️ Skipping trade: {error_msg}")
-                        results.append({'status': 'volume_too_small', 'trade': trade, 'error': user_friendly_msg})
-                        continue
+                        if trade_type == 'buy':
+                            # attempt uplift to meet minimums if within caps and cash
+                            required_usd = max(costmin, ordermin * price if price else 0.0)
+                            try:
+                                live_ctx = self.kraken_api.get_comprehensive_portfolio_context()
+                                available_cash = float(live_ctx.get('cash_balance', 0.0))
+                            except Exception:
+                                available_cash = float(portfolio_data.get('cash_balance', 0.0))
+                            effective_available = max(0.0, available_cash - reserved_cash)
+                            cap_pct = 0.95 if portfolio_value < 50 else 0.40
+                            cap_usd = cap_pct * portfolio_value
+                            if required_usd > 0 and required_usd <= effective_available * 1.001 and required_usd <= cap_usd * 1.001:
+                                uplifted_volume = ordermin
+                                trade_to_validate['volume'] = uplifted_volume
+                                volume = uplifted_volume
+                                # reserve delta cash
+                                delta_usd = max(0.0, required_usd - trade_usd)
+                                reserved_cash += delta_usd
+                                logger.info(f"⬆️ Uplifted BUY for {pair}: volume {trade_usd/price if price else 0:.8f} -> {uplifted_volume:.8f} to satisfy minimum; reserved +${delta_usd:.2f} (total reserved ${reserved_cash:.2f})")
+                            else:
+                                error_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {pair}"
+                                user_friendly_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {original_pair}"
+                                logger.warning(f"⚠️ Skipping trade: {error_msg}")
+                                results.append({'status': 'volume_too_small', 'trade': trade, 'error': user_friendly_msg})
+                                continue
+                        else:
+                            error_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {pair}"
+                            user_friendly_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {original_pair}"
+                            logger.warning(f"⚠️ Skipping trade: {error_msg}")
+                            results.append({'status': 'volume_too_small', 'trade': trade, 'error': user_friendly_msg})
+                            continue
                     
                     # Effective USD minimum check (costmin or ordermin * price)
                     trade_usd = volume * price if price else 0.0
@@ -396,6 +463,29 @@ class TradeExecutor:
                             'error': f"USD value ${trade_usd:.2f} below effective minimum ${effective_min_usd:.2f} for {original_pair}"
                         })
                         continue
+
+                    # CASH AVAILABILITY CHECK for BUY orders (guard against buy-before-sell & oversubscription)
+                    if trade_type == 'buy':
+                        try:
+                            live_ctx = self.kraken_api.get_comprehensive_portfolio_context()
+                            available_cash = float(live_ctx.get('cash_balance', 0.0))
+                        except Exception:
+                            available_cash = float(portfolio_data.get('cash_balance', 0.0))
+                        effective_available = max(0.0, available_cash - reserved_cash)
+                        if trade_usd > effective_available * 1.001:  # small tolerance
+                            original_pair = trade.get('pair', pair)
+                            logger.warning(
+                                f"⚠️ Skipping trade: insufficient cash. Needed ${trade_usd:.2f}, available ${effective_available:.2f} (after reservations) for {pair}"
+                            )
+                            results.append({
+                                'status': 'insufficient_cash',
+                                'trade': trade,
+                                'error': f"Insufficient cash. Needed ${trade_usd:.2f}, available ${effective_available:.2f} for {original_pair}"
+                            })
+                            continue
+                        # Reserve cash for this validated BUY
+                        reserved_cash += trade_usd
+                        logger.info(f"Reserved ${trade_usd:.2f} for {pair}. Reserved total=${reserved_cash:.2f}; Live cash=${available_cash:.2f}")
                     
                     logger.info(f"✅ Volume check passed: {volume:.8f} >= {ordermin:.8f} minimum for {pair}")
                 else:
@@ -429,6 +519,7 @@ class TradeExecutor:
             return results
             
         logger.info(f"Executing {len(validated_trades)} {trade_type.upper()} trade(s)...")
+        txids: list[str] = []
         for trade in validated_trades:
             try:
                 pair = trade['pair']
@@ -448,6 +539,7 @@ class TradeExecutor:
                 success_message = f"Successfully executed {action} of {pair}. TxID: {txid}"
                 logger.info(success_message)
                 results.append({'status': 'success', 'trade': trade, 'txid': txid})
+                txids.append(txid)
 
             except KrakenAPIError as e:
                 error_message = f"Live execution failed for trade {trade}: {e}"
