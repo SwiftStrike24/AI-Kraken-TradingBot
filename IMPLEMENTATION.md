@@ -7,8 +7,35 @@ It runs daily at 07:00 AM MST, evaluates the market using real-time data and com
 The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
-
-**🚀 MODEL UPGRADE (August 7, 2025): GPT‑5 Migration & Safe Fallback — IMPLEMENTED ✅**
+  
+  **💵 Cash Buffer Policy Update (August 12, 2025) — IMPLEMENTED ✅**
+  - Change: For portfolios >$50, reduce required cash buffer from 5% to 1% to maximize invested capital.
+  - Prompt: `bot/prompt_template.md` updated: “maintain 1% cash buffer”.
+  - Supervisor: Validation uplift cap adjusted to allow up to 99% allocation for BUY uplift checks on portfolios ≥ $50 (was 40% cap tied to old buffer). Small portfolios (<$50) remain at 95% max.
+  - Impact: Increases allowable capital deployment while preserving a minimal operational buffer.
+  
+  **🧱 Micro-Trade Guard (August 12, 2025) — IMPLEMENTED ✅**
+  - Rule: Block any BUY/SELL with USD notional less than max($25, 5% of equity) to avoid fees/slippage on micro trades.
+  - Prompt: Added explicit constraint to `bot/prompt_template.md` so AI avoids proposing micro-trades.
+  - Executor: Enforced in `bot/trade_executor.py` before order placement; logs with status `micro_trade_blocked`.
+  - Impact: Fewer wasteful tiny orders; cleaner execution, lower fees, lower slippage risk.
+   
+   **⚡ PARALLELIZED EARLY STAGES (August 12, 2025) — IMPLEMENTED ✅**
+ - Goal: Reduce wall-clock time by running early I/O-bound stages in parallel.
+ - What runs concurrently: Stage 0 (Reflection-AI), Stage 1 (CoinGecko-AI), Stage 2a (Analyst Prefetch: crypto + macro RSS).
+ - Barrier: After Stage 1 + 2a complete, Stage 2b performs AI market context synthesis using pre-fetched headlines + CoinGecko + Reflection context.
+ - Code Changes:
+   - `agents/supervisor_agent.py`: Parallel kickoff via `ThreadPoolExecutor`; detailed timing logs; barrier before Analyst synthesis.
+   - `agents/analyst_agent.py`: Added `prefetch_news()` and `synthesize_from_prefetch()` to split fetch/synthesis.
+   - `bot/research_agent.py`: Added `prefetch_crypto_headlines()`, `prefetch_macro_headlines()`, `synthesize_market_context()` wrappers.
+   - `scheduler_multiagent.py`: Startup log shows parallelization ON/OFF.
+ - Flags:
+   - `PIPELINE_PARALLEL_STAGES` (default `1` ON). Set `0` to revert to sequential pipeline.
+   - `PARALLEL_MAX_WORKERS` (default `3`).
+ - Safety: If any prefetch fails, pipeline falls back to sequential Analyst execution; agent-specific fallbacks remain in place.
+ - Impact: Overlaps I/O to provide faster, richer context to Strategist/Trader stages.
+ 
+ **🚀 MODEL UPGRADE (August 7, 2025): GPT‑5 Migration & Safe Fallback — IMPLEMENTED ✅**
 - Default model changed from `gpt-4o` to `gpt-5-2025-08-07` across all OpenAI calls.
 - Introduced centralized model config helper `bot/openai_config.py` with env overrides:
   - `OPENAI_DEFAULT_MODEL` (default `gpt-5-2025-08-07`)

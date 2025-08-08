@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Any
 import requests
 from urllib.parse import urlparse
 from openai import OpenAI, APIError
+import threading
 from bot.logger import get_logger
 
 # Set up logging
@@ -723,3 +724,15 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
         
         logger.info("Daily market research report generation completed")
         return final_report
+
+    def prefetch_crypto_headlines(self, keywords: List[str], bypass_cache: bool = False) -> List[str]:
+        """Prefetch crypto headlines only (no file writes). Safe to run in parallel."""
+        return self._fetch_from_rss(self.crypto_rss_feeds, keywords or self.crypto_keywords, "crypto news", bypass_cache=bypass_cache)
+
+    def prefetch_macro_headlines(self, keywords: List[str], bypass_cache: bool = False) -> List[str]:
+        """Prefetch macro/regulatory headlines only (no file writes). Safe to run in parallel."""
+        return self._fetch_from_rss(self.macro_rss_feeds, keywords or self.macro_keywords, "macro/regulatory news", bypass_cache=bypass_cache)
+
+    def synthesize_market_context(self, coingecko_data: Dict[str, Any], crypto_headlines: List[str], macro_headlines: List[str]) -> str:
+        """Synthesize AI market context from pre-fetched headlines and CoinGecko result."""
+        return self._fetch_market_summary(coingecko_data, crypto_headlines, macro_headlines)

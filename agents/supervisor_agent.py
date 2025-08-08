@@ -199,40 +199,91 @@ class SupervisorAgent(BaseAgent):
         """
         # --- FIX: Ensure fresh data on the first run of the cycle ---
         inputs['bypass_cache'] = True 
-        
-        # --- NEW: REFLECTION STAGE ---
-        reflection_result = self._run_reflection_stage(inputs)
-        
-        # Make reflection available to Analyst/Research for report augmentation
-        try:
-            from .reflection_agent import REFLECTION_PROVIDER
-            
-            reflection_model_name = "Unknown"
-            if REFLECTION_PROVIDER == "openai":
-                from bot.openai_config import get_default_openai_model
-                model_id = get_default_openai_model()
-                if "gpt-5" in model_id:
-                    reflection_model_name = "OpenAI GPT-5"
-                else:
-                    reflection_model_name = f"OpenAI {model_id}"
-            
-            elif REFLECTION_PROVIDER == "gemini":
-                from bot.gemini_client import DEFAULT_MODEL as GEMINI_MODEL_NAME
-                reflection_model_name = f"Google {GEMINI_MODEL_NAME}"
 
-            inputs["reflection_report"] = reflection_result.get("reflection_report", {})
-            inputs["reflection_model"] = reflection_model_name
-        except Exception as e:
-            self.logger.warning(f"Could not set reflection model name: {e}")
-            # Fallback for safety
-            inputs["reflection_report"] = reflection_result.get("reflection_report", {})
-            inputs["reflection_model"] = "gemini-2.5-pro"
+        use_parallel = os.getenv("PIPELINE_PARALLEL_STAGES", "1").lower() in {"1", "true", "yes"}
+        if use_parallel:
+            import time
+            from concurrent.futures import ThreadPoolExecutor
+            self.logger.info("⏱️ Parallel kickoff: Reflection, CoinGecko, Analyst-prefetch")
+            t0 = time.perf_counter()
+            with ThreadPoolExecutor(max_workers=int(os.getenv("PARALLEL_MAX_WORKERS", "3"))) as ex:
+                fut_reflection = ex.submit(self._run_reflection_stage, inputs)
+                fut_coingecko = ex.submit(self._run_coingecko_stage, inputs)
+                fut_prefetch = ex.submit(self.analyst.prefetch_news, inputs)
+                # Reflection may be needed to annotate inputs for Analyst synthesis
+                reflection_result = fut_reflection.result()
+                self.logger.info(f"✅ Reflection-AI completed in {time.perf_counter() - t0:.2f}s")
+                # Attach reflection info for downstream consumers
+                try:
+                    from .reflection_agent import REFLECTION_PROVIDER
+                    reflection_model_name = "Unknown"
+                    if REFLECTION_PROVIDER == "openai":
+                        from bot.openai_config import get_default_openai_model
+                        model_id = get_default_openai_model()
+                        reflection_model_name = "OpenAI GPT-5" if "gpt-5" in model_id else f"OpenAI {model_id}"
+                    elif REFLECTION_PROVIDER == "gemini":
+                        from bot.gemini_client import DEFAULT_MODEL as GEMINI_MODEL_NAME
+                        reflection_model_name = f"Google {GEMINI_MODEL_NAME}"
+                    inputs["reflection_report"] = reflection_result.get("reflection_report", {})
+                    inputs["reflection_model"] = reflection_model_name
+                except Exception as e:
+                    self.logger.warning(f"Could not set reflection model name: {e}")
+                    inputs["reflection_report"] = reflection_result.get("reflection_report", {})
+                    inputs["reflection_model"] = "gemini-2.5-pro"
 
-        # Initial data gathering stages
-        coingecko_result = self._run_coingecko_stage(inputs)
-        analyst_result = self._run_analyst_stage(coingecko_result, inputs)
-        # Keep the initial analyst report available for reuse during fast refinement
-        initial_analyst_result = analyst_result
+                coingecko_result = fut_coingecko.result()
+                self.logger.info(f"✅ CoinGecko-AI completed in {time.perf_counter() - t0:.2f}s")
+                prefetch_result = fut_prefetch.result()
+                self.logger.info(f"✅ Analyst prefetch completed in {time.perf_counter() - t0:.2f}s (crypto={len(prefetch_result.get('crypto_headlines', []))}, macro={len(prefetch_result.get('macro_headlines', []))})")
+            self.logger.info("🔗 Consolidation barrier reached: synthesizing Analyst-AI with prefetch + CoinGecko")
+            t_syn = time.perf_counter()
+            try:
+                self.current_state = PipelineState.RUNNING_ANALYST
+                analyst_result = self.analyst.synthesize_from_prefetch(inputs, coingecko_result, prefetch_result)
+                # Store result in execution context for downstream consumers
+                self.execution_context.setdefault("agent_outputs", {})["analyst"] = analyst_result
+                self.logger.info(f"📊 Analyst-AI synthesis completed in {time.perf_counter() - t_syn:.2f}s")
+                self.logger.info("✅ Analyst-AI completed successfully")
+            except Exception as e:
+                self.logger.error(f"Analyst synthesis failed: {e}")
+                # Degrade gracefully to analyst fallback
+                analyst_result = self._analyst_fallback()
+                self.execution_context.setdefault("agent_outputs", {})["analyst"] = analyst_result
+                self.execution_context.setdefault("warnings", []).append(f"Analyst-AI failed in parallel path: {str(e)}")
+            initial_analyst_result = analyst_result
+        else:
+            # --- NEW: REFLECTION STAGE --- (sequential path)
+            reflection_result = self._run_reflection_stage(inputs)
+            # Make reflection available to Analyst/Research for report augmentation
+            try:
+                from .reflection_agent import REFLECTION_PROVIDER
+                
+                reflection_model_name = "Unknown"
+                if REFLECTION_PROVIDER == "openai":
+                    from bot.openai_config import get_default_openai_model
+                    model_id = get_default_openai_model()
+                    if "gpt-5" in model_id:
+                        reflection_model_name = "OpenAI GPT-5"
+                    else:
+                        reflection_model_name = f"OpenAI {model_id}"
+                
+                elif REFLECTION_PROVIDER == "gemini":
+                    from bot.gemini_client import DEFAULT_MODEL as GEMINI_MODEL_NAME
+                    reflection_model_name = f"Google {GEMINI_MODEL_NAME}"
+
+                inputs["reflection_report"] = reflection_result.get("reflection_report", {})
+                inputs["reflection_model"] = reflection_model_name
+            except Exception as e:
+                self.logger.warning(f"Could not set reflection model name: {e}")
+                # Fallback for safety
+                inputs["reflection_report"] = reflection_result.get("reflection_report", {})
+                inputs["reflection_model"] = "gemini-2.5-pro"
+
+            # Initial data gathering stages
+            coingecko_result = self._run_coingecko_stage(inputs)
+            analyst_result = self._run_analyst_stage(coingecko_result, inputs)
+            # Keep the initial analyst report available for reuse during fast refinement
+            initial_analyst_result = analyst_result
 
         while self.refinement_attempts < self.max_refinement_loops:
             self.current_state = PipelineState.RUNNING_STRATEGIST
@@ -883,7 +934,7 @@ class SupervisorAgent(BaseAgent):
                             except Exception:
                                 price_for_min = 0
                             required_usd = max(costmin, min_volume * price_for_min if price_for_min else 0.0)
-                            cap_pct = 0.95 if portfolio_value < 50 else 0.40
+                            cap_pct = 0.99 if portfolio_value >= 50 else 0.95
                             cap_usd = cap_pct * portfolio_value
                             effective_available = live_cash_balance + expected_sell_proceeds_usd
                             if required_usd > 0 and required_usd <= cap_usd * 1.001 and required_usd <= effective_available * 1.001:
@@ -905,7 +956,7 @@ class SupervisorAgent(BaseAgent):
                             # same uplift tolerance as above
                             if trade.get('action') == 'buy':
                                 required_usd = effective_min_usd
-                                cap_pct = 0.95 if portfolio_value < 50 else 0.40
+                                cap_pct = 0.99 if portfolio_value >= 50 else 0.95
                                 cap_usd = cap_pct * portfolio_value
                                 effective_available = live_cash_balance + expected_sell_proceeds_usd
                                 if required_usd <= cap_usd * 1.001 and required_usd <= effective_available * 1.001:

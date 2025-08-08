@@ -426,16 +426,19 @@ class TradeExecutor:
                             except Exception:
                                 available_cash = float(portfolio_data.get('cash_balance', 0.0))
                             effective_available = max(0.0, available_cash - reserved_cash)
-                            cap_pct = 0.95 if portfolio_value < 50 else 0.40
+                            # Cap reflects cash buffer policy (small portfolios < $50: 95%; otherwise allow up to 99%)
+                            cap_pct = 0.95 if portfolio_value < 50 else 0.99
                             cap_usd = cap_pct * portfolio_value
                             if required_usd > 0 and required_usd <= effective_available * 1.001 and required_usd <= cap_usd * 1.001:
                                 uplifted_volume = ordermin
                                 trade_to_validate['volume'] = uplifted_volume
                                 volume = uplifted_volume
                                 # reserve delta cash
-                                delta_usd = max(0.0, required_usd - trade_usd)
+                                # trade_usd may not be computed yet; compute from uplift
+                                trade_usd_uplift = uplifted_volume * price if price else required_usd
+                                delta_usd = max(0.0, trade_usd_uplift - reserved_cash)
                                 reserved_cash += delta_usd
-                                logger.info(f"⬆️ Uplifted BUY for {pair}: volume {trade_usd/price if price else 0:.8f} -> {uplifted_volume:.8f} to satisfy minimum; reserved +${delta_usd:.2f} (total reserved ${reserved_cash:.2f})")
+                                logger.info(f"⬆️ Uplifted BUY for {pair}: set volume to {uplifted_volume:.8f} to satisfy minimum; reserved +${delta_usd:.2f} (total reserved ${reserved_cash:.2f})")
                             else:
                                 error_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {pair}"
                                 user_friendly_msg = f"Volume {volume:.8f} below minimum order size {ordermin:.8f} for {original_pair}"
@@ -449,8 +452,24 @@ class TradeExecutor:
                             results.append({'status': 'volume_too_small', 'trade': trade, 'error': user_friendly_msg})
                             continue
                     
-                    # Effective USD minimum check (costmin or ordermin * price)
+                    # MICRO-TRADE GUARD: Block trades smaller than max($25, 5% of equity)
                     trade_usd = volume * price if price else 0.0
+                    micro_abs = 25.0
+                    micro_pct = 0.05 * portfolio_value
+                    micro_threshold = max(micro_abs, micro_pct)
+                    if trade_usd < micro_threshold:
+                        original_pair = trade.get('pair', pair)
+                        logger.warning(
+                            f"⚠️ Skipping trade: USD value ${trade_usd:.2f} below micro-trade threshold ${micro_threshold:.2f} for {pair}"
+                        )
+                        results.append({
+                            'status': 'micro_trade_blocked',
+                            'trade': trade,
+                            'error': f"USD value ${trade_usd:.2f} below micro-trade threshold ${micro_threshold:.2f} for {original_pair}"
+                        })
+                        continue
+
+                    # Effective USD minimum check (costmin or ordermin * price)
                     effective_min_usd = max(costmin, ordermin * price if price else 0.0)
                     if effective_min_usd > 0 and trade_usd < effective_min_usd:
                         original_pair = trade.get('pair', pair)

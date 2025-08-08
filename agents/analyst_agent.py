@@ -112,7 +112,125 @@ class AnalystAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Unexpected error during market analysis: {e}")
             raise
-    
+
+    def prefetch_news(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Prefetch crypto and macro headlines concurrently (no file writes)."""
+        from concurrent.futures import ThreadPoolExecutor
+        self.logger.info("🛰️ Prefetching news (crypto + macro) in parallel...")
+        research_focus = inputs.get('research_focus', 'general_market_analysis')
+        bypass_cache = inputs.get('bypass_cache', False)
+        # dynamic query keywords augmentation mirrors execute()
+        is_dynamic_query = "deep dive on" in research_focus.lower() or "focus on finding" in research_focus.lower() or "propose a new plan" in research_focus.lower()
+        crypto_keywords = self.research_engine.crypto_keywords
+        macro_keywords = self.research_engine.macro_keywords
+        if is_dynamic_query:
+            try:
+                query_keywords = [w for w in research_focus.replace(',', ' ').replace(':', ' ').lower().split() if len(w) > 2]
+                crypto_keywords = list(set(crypto_keywords + query_keywords))
+                macro_keywords = list(set(macro_keywords + query_keywords))
+            except Exception:
+                pass
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fut_crypto = ex.submit(self.research_engine.prefetch_crypto_headlines, crypto_keywords, bypass_cache)
+            fut_macro = ex.submit(self.research_engine.prefetch_macro_headlines, macro_keywords, bypass_cache)
+            crypto = fut_crypto.result()
+            macro = fut_macro.result()
+        return {
+            "status": "success",
+            "crypto_headlines": crypto or [],
+            "macro_headlines": macro or [],
+            "timestamp": datetime.now().isoformat(),
+            "research_focus": research_focus,
+        }
+
+    def synthesize_from_prefetch(self, inputs: Dict[str, Any], coingecko_result: Dict[str, Any], prefetch_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Synthesize market report using pre-fetched headlines and CoinGecko data."""
+        self.logger.info("Generating AI market analysis from pre-fetched headlines and CoinGecko data...")
+        try:
+            crypto = prefetch_result.get("crypto_headlines", [])
+            macro = prefetch_result.get("macro_headlines", [])
+            summary = self.research_engine.synthesize_market_context(coingecko_result, crypto, macro)
+            # Build a full markdown report and persist to the canonical path for downstream use
+            now_utc = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            # Optional reflection section
+            reflection = inputs.get('reflection_report')
+            reflection_model = inputs.get('reflection_model', 'gemini-2.5-pro')
+            reflection_lines = []
+            if isinstance(reflection, dict) and (reflection.get('summary') or reflection.get('key_learnings') or reflection.get('recommended_focus')):
+                reflection_lines = [
+                    "",
+                    "**🧠 Historical Reflection:**",
+                    f"_Model: {reflection_model}_",
+                    "",
+                    reflection.get('summary', "No reflection summary available."),
+                ]
+                key_learnings = reflection.get('key_learnings', [])
+                if isinstance(key_learnings, list) and key_learnings:
+                    reflection_lines.append("")
+                    reflection_lines.append("Key Learnings:")
+                    for item in key_learnings[:6]:
+                        reflection_lines.append(f"- {str(item)}")
+                focus = reflection.get('recommended_focus')
+                if focus:
+                    reflection_lines.append("")
+                    reflection_lines.append(f"Recommended Focus: {focus}")
+                reflection_lines.append("")
+
+            body_md = "\n".join([
+                "## 📰 Crypto News Headlines",
+                * (crypto if crypto else ["- [LIVE DATA UNAVAILABLE] No crypto headlines could be fetched from RSS feeds"]),
+                "",
+                "## 🏛️ Macro & Regulatory Updates",
+                * (macro if macro else ["- [LIVE DATA UNAVAILABLE] No macro/regulatory headlines could be fetched from RSS feeds"]),
+                "",
+                "## 📊 Market Context",
+                "**AI-Generated Market Analysis:**",
+                "_Model: OpenAI GPT-5_",
+                "",
+                summary,
+                "",
+                "*Analysis based on live news feeds from across the political spectrum*",
+                *reflection_lines,
+            ])
+            report_md = "\n".join([
+                "# Daily Market Research Report",
+                f"**Generated:** {now_utc}",
+                "",
+                body_md,
+                "",
+                "---",
+                "*Report generated by AI Research Agent*",
+            ])
+            # Persist the daily research report
+            try:
+                with open(self.research_engine.report_path, 'w', encoding='utf-8') as f:
+                    f.write(report_md)
+                # Persist prefetch cache state
+                try:
+                    self.research_engine._save_cache()
+                except Exception:
+                    pass
+                self.logger.info(f"Daily research report saved to {self.research_engine.report_path}")
+            except Exception as save_err:
+                self.logger.error(f"Could not save research report: {save_err}")
+            structured_report = self._structure_report(report_md, inputs.get('research_focus', 'general_market_analysis'), inputs.get('priority_keywords', []))
+            market_metrics = self._calculate_market_metrics(coingecko_result)
+            self.logger.info("Market intelligence synthesis completed successfully")
+            return {
+                "status": "success",
+                "agent": "Analyst-AI",
+                "timestamp": datetime.now().isoformat(),
+                "research_report": structured_report,
+                "raw_report": report_md,
+                "research_focus": inputs.get('research_focus', 'general_market_analysis'),
+                "priority_keywords": inputs.get('priority_keywords', []),
+                "market_metrics": market_metrics,
+                "intelligence_quality": self._assess_intelligence_quality(structured_report)
+            }
+        except Exception as e:
+            self.logger.error(f"Analyst synthesis from prefetch failed: {e}")
+            raise
+
     def _calculate_market_metrics(self, coingecko_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate volatility and trend metrics from CoinGecko data.

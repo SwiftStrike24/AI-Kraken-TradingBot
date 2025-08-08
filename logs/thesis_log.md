@@ -52,3 +52,51 @@ Market tone is bullish with accelerating alt rotation while BTC lags and ETH is 
 
 ---
 
+## Thesis for 2025-08-08 20:56:58 UTC
+
+Market tone is bullish with BTC dominance slipping and alt rotation led by ETH (+4.9% 24h) while SOL (+2.9% 24h) sits below the 185 reclaim trigger and SUI (+3.4% 24h) benefits from Swiss institutional custody headlines. To maximize alpha versus BTC/ETH, we rotate 16% from SOL into ETH, boosting exposure to the strongest momentum asset (ETH breakout above $4,000 with a $4.4–$4.6k target) while retaining sizable SUI given its 3.70–3.85 base and institutional catalyst. This keeps positions within the 40% cap, raises cash to ~6% for risk management, and aligns with altcoin rotation as BTC remains rangebound. Key risks include policy/AML headlines and BTC range breaks; we’ll re-add to SOL on a sustained reclaim >185.
+
+---
+
+## Thesis for 2025-08-08 21:04:07 UTC
+
+Market tone is moderately bullish with ETH-led alt rotation and fresh institutional catalysts for SUI, while SOL approaches a key 180–185 resistance band and BTC consolidates in range. To maximize alpha vs BTC/ETH under constraints, we keep ETH exposure intact (ETH remains strong but an incremental buy would breach Kraken’s 0.002 ETH minimum given a 5% step and the 40% cap), rotate a portion of SOL into SUI where news flow and support-in-range favor upside continuation, and add a small BTC ballast to lift BTC+ETH to >=40% without exceeding the 40% single-position cap. This maintains a net-long alt bias with overweight SUI, reduces SOL into resistance, preserves a >5% cash buffer, and ensures all orders satisfy Kraken minimum sizes.
+
+---
+
+## Thesis for 2025-08-08 21:13:46 UTC
+
+Market tone is bullish with alt leadership broadening as ETH reclaims $4k and SOL/SUI show strong catalysts; to maximize alpha vs BTC/ETH, we rotate out of BTC near resistance into SOL’s impending $180 breakout while modestly trimming SUI after its institutional access bump. We maintain ETH as core ballast (no change to avoid breaching the 40% cap and ETH’s higher order-min) and keep a 5% cash buffer. This concentrates exposure in the strongest relative-strength alt (SOL) while preserving diversified upside from SUI and ETH, aligning with the day’s high-conviction alt rotation setup and minimizing fee drag with a single sizable SOL add.
+
+---
+
+## Thesis for 2025-08-08 21:36:53 UTC
+
+Risk sentiment is moderately bullish with ETH-led breadth and falling BTC dominance, while SUI enjoys fresh institutional catalysts (regulated Swiss custody/trading) and unlock absorption. We implement an altcoin rotation by trimming SOL (below the add-above-$180 trigger) and reallocating to SUI to capture relative strength and news-driven momentum, keeping ETH exposure intact. This shift targets alpha versus BTC/ETH benchmarks during an alt rotation phase, maintains position caps (<40% per asset), leaves ~1% cash buffer, and meets Kraken minimum order sizes for executions.
+
+---
+
+## Thesis for 2025-08-08 21:54:12 UTC
+
+Altcoin rotation is leading while BTC ranges and ETH holds $4k with upside potential. We keep core ETH exposure unchanged and tilt toward SUI—benefiting from institutional access and positive flow—by reallocating 4% from SOL to bring SUI to the 40% cap. We also add a small 5% DOGE momentum sleeve given its leadership as BTC dominance falls, funded by an additional SOL trim. All orders meet Kraken minimum sizes, preserve the 1% cash buffer, and align with the current catalyst-driven market to maximize alpha versus BTC/ETH.
+
+---
+
+## Thesis for 2025-08-08 22:02:26 UTC
+
+ETH’s strong momentum toward $4.3–$4.4k and SUI’s institutional access tailwind support maintaining existing ETH/SUI overweights, while rotation opportunities are strongest in DOGE as BTC consolidates and dominance slips. I’m selling SOL (near its ~$180 pivot and only market-weight in the current analysis) to fund a single high-conviction DOGE add, aiming for tactical upside toward $0.25 with defined support at $0.21. This concentrates risk in a likely alpha generator versus BTC/ETH, keeps each position under 40%, satisfies the >$25 minimum order rule and orermin, and preserves a >1% cash buffer for prudence.
+
+---
+
+## Thesis for 2025-08-08 22:09:07 UTC
+
+Market tone is modestly bullish with ETH holding >$4K and targeting $4.4K, SUI supported by institutional access in the $3.80–$4.00 zone, and DOGE maintaining momentum above $0.20. The current portfolio is already aligned to this momentum regime (ETH/SUI/DOGE overweight) and within the 40% max-per-position cap. A dry run shows the only high-conviction add—topping ETH to 40%—would require ~4.8% (~$5) which violates the $25 micro-trade guard, while any buy ≥$25 would push ETH >40%, making it impossible under constraints (XETHZUSD ordemin 0.002≈$8 is satisfied, but the $25 guard and 40% cap conflict). Similar adjustments for DOGE or SUI would either breach the 40% cap or fall below the $25 minimum. Therefore, to maximize alpha without breaking rules or incurring suboptimal micro tickets, we hold positions and await a setup where a $25+ rotation can be executed without breaching the 40% cap (e.g., a breakout in SOL >$180 or a pullback/relative-strength shift). This preserves current momentum exposure versus BTC/ETH while respecting operational constraints.
+
+---
+
+## Thesis for 2025-08-08 22:58:30 UTC
+
+Market tone is cautiously bullish with ETH leading but alt rotation accelerating as BTC consolidates. To maximize alpha versus BTC/ETH, we rotate capital from SUI (sub-trigger below $4.00; news likely priced) into a higher-momentum alt, AERO, which is exhibiting strong breakout behavior and sector catalysts (Base activity). We retain ETH (35%) for ballast and DOGE (27%) for ongoing meme momentum while keeping a ≥1% cash buffer. All trades use exact Kraken USD pairs, respect the 40% per-position cap, and meet the ≥$25 micro-trade and ord-min requirements.
+
+---
+

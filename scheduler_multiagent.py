@@ -33,6 +33,12 @@ logger = get_logger(__name__)
 # --- Scheduler state ---
 pipeline_running = threading.Event()
 
+# Monitoring log controls
+import os
+MONITOR_LOG_EVERY_N = int(os.getenv("MONITOR_LOG_EVERY_N", "10"))  # log once every N cycles
+MONITOR_SILENT = os.getenv("MONITOR_SILENT", "0").lower() in {"1", "true", "yes"}
+monitor_log_counter = 0
+
 
 def _sigint_handler(signum, frame):
     """Immediately terminate on Ctrl+C."""
@@ -155,9 +161,8 @@ def monitor_market(supervisor: SupervisorAgent):
     Performs a lightweight, continuous market monitoring check.
     This is the heart of the new "always-on" autonomous agent.
     """
-    logger.info("~" * 80)
-    logger.info("~ 🧠 Performing continuous market monitoring...")
-    logger.info("~" * 80)
+    global monitor_log_counter
+    monitor_log_counter += 1
 
     # In a full implementation, this method would:
     # 1. Fetch live prices for currently held assets.
@@ -170,6 +175,10 @@ def monitor_market(supervisor: SupervisorAgent):
     anomaly_detected = False 
     
     if anomaly_detected:
+        # Always log anomalies
+        logger.info("~" * 80)
+        logger.info("~ 🧠 Performing continuous market monitoring...")
+        logger.info("~" * 80)
         logger.warning("🚨 ANOMALY DETECTED! Triggering full trading cycle for immediate re-evaluation.")
         try:
             if not pipeline_running.is_set():
@@ -184,7 +193,12 @@ def monitor_market(supervisor: SupervisorAgent):
             import sys
             sys.exit(1) # Exit with an error code
     else:
-        logger.info("✅ No market anomalies detected. Continuing to monitor...")
+        # Throttle routine monitoring logs unless explicitly disabled
+        if not MONITOR_SILENT and (MONITOR_LOG_EVERY_N > 0) and (monitor_log_counter % MONITOR_LOG_EVERY_N == 0):
+            logger.info("~" * 80)
+            logger.info("~ 🧠 Performing continuous market monitoring...")
+            logger.info("~" * 80)
+            logger.info("✅ No market anomalies detected. Continuing to monitor...")
 
 
 def _scheduled_job(supervisor: SupervisorAgent):
@@ -240,6 +254,10 @@ def main():
     logger.info("🧠 Mode: Advanced Multi-Agent Cognitive System")
     logger.info("💰 Currency: USD Trading on Kraken")
     logger.info("📊 Logging: Trades → logs/trades.csv | Equity → logs/equity.csv")
+    import os
+    parallel_on = os.getenv("PIPELINE_PARALLEL_STAGES", "1").lower() in {"1","true","yes"}
+    logger.info(f"🧵 Stage parallelization: {'ON' if parallel_on else 'OFF'}")
+    logger.info(f"👁️  Monitor logs: {'SILENT' if MONITOR_SILENT else f'every {MONITOR_LOG_EVERY_N} cycle(s)'}")
     logger.info("=" * 60)
     
     # Schedule the multi-agent trading cycle
