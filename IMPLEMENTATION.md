@@ -1116,3 +1116,24 @@ Rationale
 - `trades_approved` now reports TRUE only when at least one trade was executed successfully; defensive-hold shows FALSE.
 
 ---
+
+### 🔍 CoinGecko Percent Change Validation & Fallbacks (August 2025) - IMPLEMENTED ✅
+- Problem: 1h/24h/7d/30d percent changes sometimes appeared wrong or fabricated when CoinGecko omitted fields; UI defaulted missing values to 0.
+- Solution:
+  - Validation mode with env toggles; compare `/coins/markets` vs `/coins/{id}` (market_data) vs recomputed from `/coins/{id}/market_chart`.
+  - If markets field missing or deviates beyond tolerance, fallback to coin overview; if still missing, fallback to recomputed time-series.
+  - Never coerce missing fields to zero; downstream renders N/A. 30d is displayed consistently.
+- Files Modified:
+  - `agents/coingecko_agent.py`: Added `_fetch_coin_overview`, `_fetch_market_chart`, `_recompute_changes_from_chart`, `_log_validation`; integrated per-field provenance and fallbacks.
+  - `agents/strategist_agent.py`: Render N/A instead of 0, include 30d, optional provenance note when validation enabled.
+  - `agents/analyst_agent.py`: Consume structured numeric fields directly; removed brittle text parsing; skip tokens with missing values.
+  - `bot/research_agent.py`: Display 1h/24h/7d/30d with N/A as needed; removed direction emojis tied to missing data.
+- Env Config:
+  - `COINGECKO_VALIDATE` = `1|true|yes` to enable validation & discrepancy logging (default off).
+  - `COINGECKO_TOLERANCE_PCTPOINTS` = decimal tolerance in percentage points (default `0.2`).
+- Logs & Provenance:
+  - Validation records appended to `logs/coingecko_validation.jsonl` with markets/overview/recomputed side-by-side and per-field sources.
+  - Strategist optionally shows a short "Data sources: markets/coin_overview/recomputed" hint per asset when validation is enabled.
+- Impact: Eliminates fabricated-looking values, ensures percent changes are real-time and consistent with CoinGecko, improves model input fidelity.
+
+---

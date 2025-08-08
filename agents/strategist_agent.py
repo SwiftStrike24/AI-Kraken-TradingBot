@@ -745,10 +745,11 @@ class StrategistAgent(BaseAgent):
                 price = data.get('current_price', 0)
                 market_cap_rank = data.get('market_cap_rank', 'N/A')
                 
-                # Price changes
-                change_1h = data.get('price_change_percentage_1h', 0) or 0
-                change_24h = data.get('price_change_percentage_24h', 0) or 0
-                change_7d = data.get('price_change_percentage_7d', 0) or 0
+                # Price changes (do not coerce missing to 0)
+                change_1h = data.get('price_change_percentage_1h')
+                change_24h = data.get('price_change_percentage_24h')
+                change_7d = data.get('price_change_percentage_7d')
+                change_30d = data.get('price_change_percentage_30d')
                 
                 # Format market cap and volume
                 market_cap = data.get('market_cap', 0)
@@ -756,9 +757,29 @@ class StrategistAgent(BaseAgent):
                 
                 text_parts.append(f"**{name} ({symbol})**")
                 text_parts.append(f"  Price: ${price:,.2f} | Rank: #{market_cap_rank}")
-                text_parts.append(f"  Changes: 1h {change_1h:+.1f}% | 24h {change_24h:+.1f}% | 7d {change_7d:+.1f}%")
+                # Build change line with N/A where missing
+                change_bits = []
+                change_bits.append(f"1h {change_1h:+.1f}%" if isinstance(change_1h, (int, float)) else "1h N/A")
+                change_bits.append(f"24h {change_24h:+.1f}%" if isinstance(change_24h, (int, float)) else "24h N/A")
+                change_bits.append(f"7d {change_7d:+.1f}%" if isinstance(change_7d, (int, float)) else "7d N/A")
+                change_bits.append(f"30d {change_30d:+.1f}%" if isinstance(change_30d, (int, float)) else "30d N/A")
+                text_parts.append("  Changes: " + " | ".join(change_bits))
                 if market_cap and volume_24h:
                     text_parts.append(f"  Market Cap: ${market_cap:,.0f} | Volume 24h: ${volume_24h:,.0f}")
+                
+                # Optional provenance if present
+                srcs = data.get('price_change_pct_sources')
+                if isinstance(srcs, dict):
+                    # Show short provenance hint when validation is enabled upstream
+                    try:
+                        from os import getenv
+                        if getenv('COINGECKO_VALIDATE', '0').lower() in {'1','true','yes'}:
+                            # Summarize whether all present fields came from markets or fallbacks
+                            distinct_sources = sorted(set(srcs.values()))
+                            text_parts.append(f"  Data sources: {', '.join(distinct_sources)}")
+                    except Exception:
+                        pass
+                
                 text_parts.append("")
         
         if trending_data and trending_data.get('coins'):
@@ -770,9 +791,32 @@ class StrategistAgent(BaseAgent):
                 name = coin.get('name', 'Unknown')
                 symbol = coin.get('symbol', '').upper()
                 rank = coin.get('market_cap_rank', 'N/A')
-                price_btc = coin.get('price_btc', 0)
-                
-                text_parts.append(f"{i}. {name} ({symbol}) - Rank #{rank} | {price_btc:.8f} BTC")
+                price_usd = coin.get('price_usd')
+                price_btc = coin.get('price_btc')
+                c1h = coin.get('price_change_percentage_1h')
+                c24h = coin.get('price_change_percentage_24h')
+                c7d = coin.get('price_change_percentage_7d')
+                c30d = coin.get('price_change_percentage_30d')
+                mcap = coin.get('market_cap')
+                vol = coin.get('total_volume')
+                def fmt(p):
+                    return f"{p:+.1f}%" if isinstance(p, (int, float)) else "N/A"
+                price_str = f"${price_usd:,.4f}" if isinstance(price_usd, (int, float)) else (f"{price_btc:.8f} BTC" if isinstance(price_btc, (int, float)) else "N/A")
+                line = f"{i}. {name} ({symbol}) - Rank #{rank} | {price_str}"
+                # Append changes if we have any
+                ch_bits = [fmt(c1h), fmt(c24h), fmt(c7d), fmt(c30d)]
+                if any(x != "N/A" for x in ch_bits):
+                    line += f" | 1h {fmt(c1h)} / 24h {fmt(c24h)} / 7d {fmt(c7d)} / 30d {fmt(c30d)}"
+                # Append mcap/volume if available
+                if isinstance(mcap, (int, float)) or isinstance(vol, (int, float)):
+                    tail = []
+                    if isinstance(mcap, (int, float)):
+                        tail.append(f"MCap ${mcap:,.0f}")
+                    if isinstance(vol, (int, float)):
+                        tail.append(f"Vol24h ${vol:,.0f}")
+                    if tail:
+                        line += " | " + ", ".join(tail)
+                text_parts.append(line)
             
             text_parts.append("")
         
@@ -781,18 +825,23 @@ class StrategistAgent(BaseAgent):
             text_parts.append("## Market Overview")
             text_parts.append("")
             
-            # Calculate average 24h change for major tokens
-            changes_24h = [data.get('price_change_percentage_24h', 0) or 0 for data in coingecko_data.values()]
-            avg_change = sum(changes_24h) / len(changes_24h) if changes_24h else 0
+            # Calculate average 24h change only on tokens with a numeric 24h
+            numeric_24h = [data.get('price_change_percentage_24h') for data in coingecko_data.values() if isinstance(data.get('price_change_percentage_24h'), (int, float))]
+            avg_change = sum(numeric_24h) / len(numeric_24h) if numeric_24h else None
             
-            if avg_change > 2:
-                market_tone = "bullish"
-            elif avg_change < -2:
-                market_tone = "bearish"
+            if avg_change is None:
+                market_tone = "unknown"
+                avg_str = "N/A"
             else:
-                market_tone = "neutral"
+                if avg_change > 2:
+                    market_tone = "bullish"
+                elif avg_change < -2:
+                    market_tone = "bearish"
+                else:
+                    market_tone = "neutral"
+                avg_str = f"{avg_change:+.1f}%"
             
-            text_parts.append(f"Market tone: {market_tone} (avg 24h change: {avg_change:+.1f}%)")
+            text_parts.append(f"Market tone: {market_tone} (avg 24h change: {avg_str})")
             text_parts.append("")
         
         return "\n".join(text_parts) if text_parts else "No real-time market data available."

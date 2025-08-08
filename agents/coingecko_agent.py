@@ -14,7 +14,7 @@ import json
 import time
 import logging
 import requests
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 
 from .base_agent import BaseAgent
@@ -74,6 +74,14 @@ class CoinGeckoAgent(BaseAgent):
         self.last_request_time = 0
         self.min_request_interval = 2.0  # 2 seconds between requests for free tier
         
+        # Validation controls (env toggles)
+        self.validate_changes = os.getenv("COINGECKO_VALIDATE", "0").lower() in {"1", "true", "yes"}
+        try:
+            self.validation_tolerance_pp = float(os.getenv("COINGECKO_TOLERANCE_PCTPOINTS", "0.2"))
+        except ValueError:
+            self.validation_tolerance_pp = 0.2
+        self.validation_log_path = os.path.join(logs_dir, "coingecko_validation.jsonl")
+        
         self.logger.info("CoinGecko agent initialized successfully")
     
     def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -105,7 +113,7 @@ class CoinGeckoAgent(BaseAgent):
             # Fetch trending tokens if requested
             if include_trending:
                 self.logger.info("Fetching trending tokens data")
-                trending_data = self.get_trending_tokens()
+                trending_data = self.get_trending_tokens(vs_currency)
             
             # Assess data quality
             data_quality = self._assess_data_quality(market_data, trending_data)
@@ -169,7 +177,7 @@ class CoinGeckoAgent(BaseAgent):
             response_data = self._query_api(endpoint, params)
             
             # Structure the response
-            market_data = {}
+            market_data: Dict[str, Any] = {}
             for coin in response_data:
                 token_id = coin['id']
                 market_data[token_id] = {
@@ -190,6 +198,124 @@ class CoinGeckoAgent(BaseAgent):
                     'last_updated': coin['last_updated']
                 }
             
+            # Validation and fallback: fill missing or inconsistent values
+            for token_id in list(market_data.keys()):
+                token_entry = market_data[token_id]
+                # Determine which fields are missing
+                pct_fields = [
+                    ('1h', 'price_change_percentage_1h'),
+                    ('24h', 'price_change_percentage_24h'),
+                    ('7d', 'price_change_percentage_7d'),
+                    ('30d', 'price_change_percentage_30d'),
+                ]
+                need_overview = any(token_entry.get(field_name) is None for _, field_name in pct_fields)
+                overview = None
+                recomputed = None
+
+                # Fetch coin overview if needed or if validation is on
+                if need_overview or self.validate_changes:
+                    try:
+                        overview = self._fetch_coin_overview(token_id)
+                    except Exception as _:
+                        overview = None
+                
+                # Fetch market chart and recompute if still missing or validation is on
+                if need_overview or self.validate_changes:
+                    try:
+                        chart = self._fetch_market_chart(token_id, vs_currency=vs_currency, days=30, interval='hourly')
+                        recomputed = self._recompute_changes_from_chart(chart.get('prices', []))
+                    except Exception as _:
+                        recomputed = None
+                
+                sources_used: Dict[str, str] = {}
+                discrepancies: Dict[str, Dict[str, float]] = {}
+
+                for horizon, field_name in pct_fields:
+                    mkts_val = token_entry.get(field_name)
+
+                    ov_val = None
+                    if overview:
+                        ov_map = {
+                            '1h': 'price_change_percentage_1h_in_currency',
+                            '24h': 'price_change_percentage_24h_in_currency',
+                            '7d': 'price_change_percentage_7d_in_currency',
+                            '30d': 'price_change_percentage_30d_in_currency'
+                        }
+                        # Coin overview uses nested fields under market_data; in_currency may be a dict per fiat
+                        md = overview.get('market_data') if isinstance(overview, dict) else None
+                        if md:
+                            # CoinGecko often provides fiat-agnostic percentage fields (not per currency) on overview
+                            if horizon == '1h':
+                                ov_val = md.get('price_change_percentage_1h_in_currency', {}).get(vs_currency)
+                            elif horizon == '24h':
+                                ov_val = md.get('price_change_percentage_24h_in_currency', {}).get(vs_currency)
+                            elif horizon == '7d':
+                                ov_val = md.get('price_change_percentage_7d_in_currency', {}).get(vs_currency)
+                            elif horizon == '30d':
+                                ov_val = md.get('price_change_percentage_30d_in_currency', {}).get(vs_currency)
+                    rc_val = None
+                    if recomputed:
+                        rc_val = recomputed.get(horizon)
+
+                    selected_val = mkts_val
+                    source = 'markets'
+
+                    # Fallback when mkts missing
+                    if selected_val is None:
+                        if ov_val is not None:
+                            selected_val = ov_val
+                            source = 'coin_overview'
+                        elif rc_val is not None:
+                            selected_val = rc_val
+                            source = 'recomputed'
+
+                    # If validation mode, consider swapping when mkts deviates strongly and others agree
+                    if self.validate_changes and mkts_val is not None:
+                        diffs = {}
+                        if ov_val is not None:
+                            diffs['markets_vs_overview'] = abs(mkts_val - ov_val)
+                        if rc_val is not None:
+                            diffs['markets_vs_recomputed'] = abs(mkts_val - rc_val)
+                        # If both alt sources exist and agree, and mkts far, switch to overview
+                        if ov_val is not None and rc_val is not None:
+                            if abs(ov_val - rc_val) <= self.validation_tolerance_pp and max(diffs.values() or [0]) > self.validation_tolerance_pp:
+                                selected_val = ov_val
+                                source = 'coin_overview'
+                                discrepancies[field_name] = {
+                                    'markets': mkts_val,
+                                    'overview': ov_val,
+                                    'recomputed': rc_val
+                                }
+                        elif ov_val is not None and 'markets_vs_overview' in diffs and diffs['markets_vs_overview'] > self.validation_tolerance_pp:
+                            selected_val = ov_val
+                            source = 'coin_overview'
+                            discrepancies[field_name] = {
+                                'markets': mkts_val,
+                                'overview': ov_val,
+                                'recomputed': rc_val if rc_val is not None else float('nan')
+                            }
+                        elif rc_val is not None and 'markets_vs_recomputed' in diffs and diffs['markets_vs_recomputed'] > self.validation_tolerance_pp:
+                            # Prefer recomputed only if overview missing
+                            if ov_val is None:
+                                selected_val = rc_val
+                                source = 'recomputed'
+                                discrepancies[field_name] = {
+                                    'markets': mkts_val,
+                                    'overview': float('nan'),
+                                    'recomputed': rc_val
+                                }
+
+                    token_entry[field_name] = selected_val
+                    sources_used[field_name] = source
+                
+                if self.validate_changes:
+                    try:
+                        self._log_validation(token_id, market_data[token_id], overview, recomputed, sources_used, discrepancies)
+                    except Exception as _:
+                        pass
+                # Attach sources so downstream can optionally show provenance
+                token_entry['price_change_pct_sources'] = sources_used
+            
             # Cache the structured data
             self._cache_data(cache_key, market_data)
             
@@ -200,14 +326,14 @@ class CoinGeckoAgent(BaseAgent):
             self.logger.error(f"Failed to fetch market data: {e}")
             raise CoinGeckoAPIError(f"Market data fetch failed: {e}")
     
-    def get_trending_tokens(self) -> Dict[str, Any]:
+    def get_trending_tokens(self, vs_currency: str = 'usd') -> Dict[str, Any]:
         """
         Fetch currently trending tokens from CoinGecko.
         
         Returns:
             Dictionary with trending tokens data
         """
-        cache_key = "trending_tokens"
+        cache_key = f"trending_tokens_{vs_currency}"
         
         # Check cache first
         cached_data = self._get_cached_data(cache_key)
@@ -228,6 +354,7 @@ class CoinGeckoAgent(BaseAgent):
             }
             
             # Process trending coins
+            trending_ids: List[str] = []
             for coin_data in response_data.get('coins', []):
                 coin = coin_data.get('item', {})
                 trending_data['coins'].append({
@@ -236,9 +363,41 @@ class CoinGeckoAgent(BaseAgent):
                     'symbol': coin.get('symbol'),
                     'market_cap_rank': coin.get('market_cap_rank'),
                     'thumb': coin.get('thumb'),
-                    'price_btc': coin.get('price_btc'),
+                    'price_btc': coin.get('price_btc'),  # kept for reference; not displayed
                     'score': coin.get('score')
                 })
+                if coin.get('id'):
+                    trending_ids.append(coin.get('id'))
+            
+            # Enrich trending coins with USD metrics using /coins/markets
+            if trending_ids:
+                try:
+                    markets = self._query_api(
+                        "/coins/markets",
+                        {
+                            'ids': ','.join(trending_ids),
+                            'vs_currency': vs_currency,
+                            'order': 'market_cap_desc',
+                            'per_page': len(trending_ids),
+                            'page': 1,
+                            'sparkline': False,
+                            'price_change_percentage': '1h,24h,7d,30d'
+                        }
+                    )
+                    mk_map = {m['id']: m for m in markets if isinstance(m, dict) and 'id' in m}
+                    for coin in trending_data['coins']:
+                        m = mk_map.get(coin.get('id'))
+                        if not m:
+                            continue
+                        coin['price_usd'] = m.get('current_price')
+                        coin['price_change_percentage_1h'] = m.get('price_change_percentage_1h_in_currency')
+                        coin['price_change_percentage_24h'] = m.get('price_change_percentage_24h_in_currency')
+                        coin['price_change_percentage_7d'] = m.get('price_change_percentage_7d_in_currency')
+                        coin['price_change_percentage_30d'] = m.get('price_change_percentage_30d_in_currency')
+                        coin['market_cap'] = m.get('market_cap')
+                        coin['total_volume'] = m.get('total_volume')
+                except Exception as enrich_err:
+                    self.logger.warning(f"Could not enrich trending coins with USD metrics: {enrich_err}")
             
             # Process trending NFTs
             for nft_data in response_data.get('nfts', []):
@@ -467,3 +626,105 @@ class CoinGeckoAgent(BaseAgent):
         """
         
         return reasoning.strip() 
+
+    def _fetch_coin_overview(self, token_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch coin overview with market_data for a single token."""
+        endpoint = f"/coins/{token_id}"
+        params = {
+            'localization': 'false',
+            'tickers': 'false',
+            'market_data': 'true',
+            'community_data': 'false',
+            'developer_data': 'false',
+            'sparkline': 'false',
+        }
+        return self._query_api(endpoint, params)
+
+    def _fetch_market_chart(self, token_id: str, vs_currency: str = 'usd', days: int = 30, interval: str = 'hourly') -> Optional[Dict[str, Any]]:
+        """Fetch market chart data for a token to recompute change percentages."""
+        endpoint = f"/coins/{token_id}/market_chart"
+        params = {
+            'vs_currency': vs_currency,
+            'days': days,
+            'interval': interval,
+        }
+        return self._query_api(endpoint, params)
+
+    def _recompute_changes_from_chart(self, prices: List[List[float]]) -> Optional[Dict[str, float]]:
+        """
+        Recompute 1h/24h/7d/30d change percentages from time-series prices.
+        prices: list of [timestamp_ms, price]
+        """
+        try:
+            if not prices or len(prices) < 2:
+                return None
+            # Ensure sorted by timestamp
+            prices_sorted = sorted(prices, key=lambda x: x[0])
+            last_ts_ms, last_px = prices_sorted[-1]
+            if not last_px or last_px <= 0:
+                return None
+            targets_sec = {
+                '1h': 3600,
+                '24h': 24*3600,
+                '7d': 7*24*3600,
+                '30d': 30*24*3600,
+            }
+            results: Dict[str, float] = {}
+            for key, secs in targets_sec.items():
+                target_ms = last_ts_ms - (secs * 1000)
+                base_px = self._find_price_at_or_before(prices_sorted, target_ms)
+                if base_px and base_px > 0:
+                    pct = (last_px - base_px) / base_px * 100.0
+                    results[key] = pct
+                else:
+                    results[key] = None
+            return results
+        except Exception:
+            return None
+
+    def _find_price_at_or_before(self, series: List[List[float]], ts_ms: int) -> Optional[float]:
+        """Binary search nearest price at or before ts_ms."""
+        lo, hi = 0, len(series) - 1
+        candidate = None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            mid_ts = series[mid][0]
+            if mid_ts == ts_ms:
+                return float(series[mid][1])
+            if mid_ts < ts_ms:
+                candidate = float(series[mid][1])
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return candidate
+
+    def _log_validation(self, token_id: str, markets_entry: Dict[str, Any], overview: Optional[Dict[str, Any]], recomputed: Optional[Dict[str, float]], sources_used: Dict[str, str], discrepancies: Dict[str, Dict[str, float]]):
+        """Append a validation record to JSONL file for offline inspection."""
+        record: Dict[str, Any] = {
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'token_id': token_id,
+            'markets': {
+                'price_change_percentage_1h': markets_entry.get('price_change_percentage_1h'),
+                'price_change_percentage_24h': markets_entry.get('price_change_percentage_24h'),
+                'price_change_percentage_7d': markets_entry.get('price_change_percentage_7d'),
+                'price_change_percentage_30d': markets_entry.get('price_change_percentage_30d'),
+                'current_price': markets_entry.get('current_price'),
+            },
+            'sources_used': sources_used,
+            'discrepancies': discrepancies,
+            'tolerance_pp': self.validation_tolerance_pp,
+        }
+        if overview and isinstance(overview, dict):
+            md = overview.get('market_data', {})
+            record['coin_overview'] = {
+                'price_change_percentage_1h': (md.get('price_change_percentage_1h_in_currency') or {}).get('usd'),
+                'price_change_percentage_24h': (md.get('price_change_percentage_24h_in_currency') or {}).get('usd'),
+                'price_change_percentage_7d': (md.get('price_change_percentage_7d_in_currency') or {}).get('usd'),
+                'price_change_percentage_30d': (md.get('price_change_percentage_30d_in_currency') or {}).get('usd'),
+            }
+        else:
+            record['coin_overview'] = None
+        record['recomputed'] = recomputed
+        os.makedirs(os.path.dirname(self.validation_log_path), exist_ok=True)
+        with open(self.validation_log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record) + "\n") 

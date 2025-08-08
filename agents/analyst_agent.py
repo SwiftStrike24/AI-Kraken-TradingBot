@@ -130,55 +130,43 @@ class AnalystAgent(BaseAgent):
             market_data = coingecko_data['market_data']
             metrics = {}
             
-            # Parse market data for each token
-            for token_info in market_data:
-                if isinstance(token_info, str):
-                    # Parse token string format: "**Bitcoin (BTC)** Price: $114,887.00 | Rank: #1 Changes: 1h -0.0% | 24h +0.1% | 7d -2.6%"
-                    lines = token_info.split('\n')
-                    for line in lines:
-                        if 'Changes:' in line and '|' in line:
-                            # Extract token name
-                            if '**' in line:
-                                token_name = line.split('**')[1].split('**')[0].split('(')[1].replace(')', '')
-                            else:
-                                continue
-                            
-                            # Extract price changes
-                            changes_part = line.split('Changes:')[1].strip()
-                            change_parts = changes_part.split('|')
-                            
-                            try:
-                                # Parse percentage changes
-                                h1_change = self._parse_percentage(change_parts[0])
-                                h24_change = self._parse_percentage(change_parts[1])
-                                d7_change = self._parse_percentage(change_parts[2])
-                                
-                                # Calculate metrics
-                                volatility = abs(h24_change)  # Simple volatility measure
-                                momentum_score = self._calculate_momentum(h1_change, h24_change, d7_change)
-                                trend_direction = self._determine_trend(h1_change, h24_change, d7_change)
-                                
-                                metrics[token_name] = {
-                                    "1h_change": h1_change,
-                                    "24h_change": h24_change,
-                                    "7d_change": d7_change,
-                                    "volatility": volatility,
-                                    "momentum_score": momentum_score,
-                                    "trend_direction": trend_direction
-                                }
-                                
-                            except Exception as e:
-                                self.logger.warning(f"Error parsing metrics for {token_name}: {e}")
-                                continue
+            # If market_data is a dict keyed by token_id (as provided by CoinGeckoAgent), use it directly
+            if isinstance(market_data, dict):
+                for token_id, data in market_data.items():
+                    name = (data.get('symbol') or token_id).upper()
+                    h1 = data.get('price_change_percentage_1h')
+                    h24 = data.get('price_change_percentage_24h')
+                    d7 = data.get('price_change_percentage_7d')
+                    # Use only if we have numeric values
+                    if not all(isinstance(x, (int, float)) for x in [h1, h24, d7] if x is not None):
+                        # Skip if key fields are missing or not numeric
+                        continue
+                    # Some may be None; require at least 24h present for volatility
+                    if isinstance(h24, (int, float)):
+                        volatility = abs(h24)
+                    else:
+                        continue
+                    # Momentum score: treat missing as 0 weight
+                    h1_val = h1 if isinstance(h1, (int, float)) else 0.0
+                    d7_val = d7 if isinstance(d7, (int, float)) else 0.0
+                    momentum_score = (h1_val * 0.5) + (h24 * 0.3) + (d7_val * 0.2)
+                    trend_direction = self._determine_trend(h1_val, h24, d7_val)
+                    metrics[name] = {
+                        "1h_change": h1_val,
+                        "24h_change": h24,
+                        "7d_change": d7_val,
+                        "volatility": volatility,
+                        "momentum_score": momentum_score,
+                        "trend_direction": trend_direction
+                    }
+            else:
+                # Legacy path: if string-formatted data sneaks in, skip to avoid wrong parsing
+                return {"status": "unsupported_format", "metrics": {}}
             
-            # Calculate overall market metrics
             if metrics:
                 overall_volatility = sum(m["volatility"] for m in metrics.values()) / len(metrics)
                 overall_momentum = sum(m["momentum_score"] for m in metrics.values()) / len(metrics)
-                
-                # Determine market regime
                 market_regime = self._determine_market_regime(overall_volatility, overall_momentum)
-                
                 return {
                     "status": "success",
                     "individual_metrics": metrics,
@@ -187,9 +175,7 @@ class AnalystAgent(BaseAgent):
                     "market_regime": market_regime,
                     "recommended_strategies": self._recommend_strategies(market_regime, overall_volatility)
                 }
-            
             return {"status": "insufficient_data", "metrics": {}}
-            
         except Exception as e:
             self.logger.error(f"Error calculating market metrics: {e}")
             return {"status": "error", "error": str(e)}

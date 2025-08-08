@@ -515,31 +515,53 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
                         name = data.get('name', token_id.upper())
                         symbol = data.get('symbol', '').upper()
                         price = data.get('current_price', 'N/A')
-                        change_24h = data.get('price_change_percentage_24h', 'N/A')
                         mcap_rank = data.get('market_cap_rank', 'N/A')
+                        c1h = data.get('price_change_percentage_1h')
+                        c24h = data.get('price_change_percentage_24h')
+                        c7d = data.get('price_change_percentage_7d')
+                        c30d = data.get('price_change_percentage_30d')
                         
-                        # Format price change with direction indicator
-                        if isinstance(change_24h, (int, float)):
-                            change_str = f"{change_24h:+.2f}%" 
-                            direction = "📈" if change_24h > 0 else "📉" if change_24h < 0 else "➡️"
-                        else:
-                            change_str = "N/A"
-                            direction = "➡️"
-                            
-                        text_parts.append(f"• {name} ({symbol}): ${price:,.2f} {direction} {change_str} (Rank #{mcap_rank})")
+                        def fmt(p):
+                            return f"{p:+.2f}%" if isinstance(p, (int, float)) else "N/A"
+                        
+                        text_parts.append(
+                            f"• {name} ({symbol}): ${price:,.2f} (Rank #{mcap_rank}) — 1h {fmt(c1h)} | 24h {fmt(c24h)} | 7d {fmt(c7d)} | 30d {fmt(c30d)}"
+                        )
             
             # Format trending data
             trending_data = coingecko_data.get('trending_data', {})
             if trending_data and trending_data.get('coins'):
-                text_parts.append("\nTREDING NOW:")
+                text_parts.append("\nTRENDING NOW:")
                 trending_coins = trending_data['coins'][:5]  # Top 5 trending
                 for i, coin in enumerate(trending_coins, 1):
                     if isinstance(coin, dict):
-                        item = coin.get('item', {})
-                        name = item.get('name', 'Unknown')
-                        symbol = item.get('symbol', 'N/A')
-                        rank = item.get('market_cap_rank', 'N/A')
-                        text_parts.append(f"  {i}. {name} ({symbol}) - Rank #{rank}")
+                        # Trending coins in research use the enriched structure from CoinGeckoAgent
+                        name = coin.get('name', 'Unknown')
+                        symbol = coin.get('symbol', 'N/A')
+                        rank = coin.get('market_cap_rank', 'N/A')
+                        price_usd = coin.get('price_usd')
+                        price_btc = coin.get('price_btc')
+                        c1h = coin.get('price_change_percentage_1h')
+                        c24h = coin.get('price_change_percentage_24h')
+                        c7d = coin.get('price_change_percentage_7d')
+                        c30d = coin.get('price_change_percentage_30d')
+                        mcap = coin.get('market_cap')
+                        vol = coin.get('total_volume')
+                        def fmt(p):
+                            return f"{p:+.1f}%" if isinstance(p, (int, float)) else "N/A"
+                        price_str = f"${price_usd:,.4f}" if isinstance(price_usd, (int, float)) else (f"{price_btc:.8f} BTC" if isinstance(price_btc, (int, float)) else "N/A")
+                        line = f"  {i}. {name} ({symbol}) - Rank #{rank} | {price_str}"
+                        ch_bits = [fmt(c1h), fmt(c24h), fmt(c7d), fmt(c30d)]
+                        if any(x != "N/A" for x in ch_bits):
+                            line += f" | 1h {fmt(c1h)} / 24h {fmt(c24h)} / 7d {fmt(c7d)} / 30d {fmt(c30d)}"
+                        tail = []
+                        if isinstance(mcap, (int, float)):
+                            tail.append(f"MCap ${mcap:,.0f}")
+                        if isinstance(vol, (int, float)):
+                            tail.append(f"Vol24h ${vol:,.0f}")
+                        if tail:
+                            line += " | " + ", ".join(tail)
+                        text_parts.append(line)
             
             # Add data quality assessment
             quality = coingecko_data.get('data_quality', {})
