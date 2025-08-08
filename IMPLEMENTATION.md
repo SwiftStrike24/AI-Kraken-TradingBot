@@ -2,11 +2,30 @@
 
 ## 🧠 Concept
 
-A fully autonomous crypto trading bot powered by ChatGPT 4o with institutional-grade market intelligence.
+A fully autonomous crypto trading bot powered by OpenAI GPT‑5 with institutional-grade market intelligence.
 It runs daily at 07:00 AM MST, evaluates the market using real-time data and comprehensive news analysis, and rebalances a portfolio of Kraken-listed tokens with the goal of generating consistent alpha vs BTC and ETH.
 The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
+
+**🚀 MODEL UPGRADE (August 7, 2025): GPT‑5 Migration & Safe Fallback — IMPLEMENTED ✅**
+- Default model changed from `gpt-4o` to `gpt-5-2025-08-07` across all OpenAI calls.
+- Introduced centralized model config helper `bot/openai_config.py` with env overrides:
+  - `OPENAI_DEFAULT_MODEL` (default `gpt-5-2025-08-07`)
+  - `OPENAI_FALLBACK_MODEL` (default `gpt-4o`)
+- Added `build_chat_completion_params()` to automatically use `max_completion_tokens` for GPT‑5 and `max_tokens` for older models.
+- Trader-AI now uses a guarded call with automatic fallback to the fallback model on API error or JSON parse failure (response_format json_object enforced).
+- ResearchAgent retries once with the fallback model on API error.
+- Removed hardcoded `max_tokens` limits from OpenAI calls to allow for maximum length responses.
+- Added richer logs: model selected, finish_reason, token usage, and JSON-parse success/failure for visibility.
+- Files Modified:
+  - `agents/trader_agent.py` (fallback wrapper + model resolution + usage logs + GPT‑5 param handling)
+  - `bot/research_agent.py` (env-backed model + one-shot fallback + GPT‑5 param handling)
+  - `bot/prompt_engine.py` (default model resolution via helper)
+  - `README.md` (GPT‑5 now primary)
+  - NEW: `bot/openai_config.py`
+- Impact: Seamless migration to GPT‑5 with safe fallback to GPT‑4o if account/availability issues occur. Zero changes to trading logic or formats.
+- Status: ✅ PRODUCTION READY
 
 **🧠 REFLECTIVE INTELLIGENCE UPGRADE (August 11, 2025):** Historical Context & Self-Correction - IMPLEMENTED ✅
 - **Problem Solved:** 413 Request Entity Too Large from OpenAI due to oversized prompts (long cognitive transcripts + verbose context).

@@ -444,21 +444,42 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
             logger.info("Generating AI-powered market analysis...")
             
             # Call OpenAI API for analysis
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a senior cryptocurrency portfolio manager and quantitative analyst at a top-tier investment firm. Your expertise spans technical analysis, fundamental research, and institutional trading strategies. You synthesize real-time market data with news sentiment to deliver precise, actionable intelligence for professional traders and portfolio managers."
-                    },
-                    {
-                        "role": "user", 
-                        "content": analysis_prompt
-                    }
-                ],
-                max_tokens=300,
-                temperature=0.1  # Low temperature for more consistent, professional analysis
-            )
+            from bot.openai_config import get_default_openai_model, get_fallback_openai_model
+            try:
+                from bot.openai_config import build_chat_completion_params
+                params = build_chat_completion_params(
+                    model=get_default_openai_model(),
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "You are a senior cryptocurrency portfolio manager and quantitative analyst at a top-tier investment firm. Your expertise spans technical analysis, fundamental research, and institutional trading strategies. You synthesize real-time market data with news sentiment to deliver precise, actionable intelligence for professional traders and portfolio managers."
+                        },
+                        {
+                            "role": "user", 
+                            "content": analysis_prompt
+                        }
+                    ],
+                    temperature=0.1,
+                )
+                response = self.openai_client.chat.completions.create(**params)
+            except Exception as first_err:
+                logger.warning(f"GPT-5 model call failed ({first_err}); retrying with fallback model")
+                from bot.openai_config import build_chat_completion_params
+                params_fb = build_chat_completion_params(
+                    model=get_fallback_openai_model(),
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "You are a senior cryptocurrency portfolio manager and quantitative analyst at a top-tier investment firm. Your expertise spans technical analysis, fundamental research, and institutional trading strategies. You synthesize real-time market data with news sentiment to deliver precise, actionable intelligence for professional traders and portfolio managers."
+                        },
+                        {
+                            "role": "user", 
+                            "content": analysis_prompt
+                        }
+                    ],
+                    temperature=0.1,
+                )
+                response = self.openai_client.chat.completions.create(**params_fb)
             
             market_analysis = response.choices[0].message.content.strip()
             
@@ -624,7 +645,7 @@ Deliver as professional, flowing analysis text suitable for institutional mornin
             
             report_sections.append("## 📊 Market Context")
             report_sections.append("**AI-Generated Market Analysis:**")
-            report_sections.append("_Model: OpenAI GPT-4o_")
+            report_sections.append("_Model: OpenAI GPT-5_")
             report_sections.append("")
             report_sections.append(market_summary)
             report_sections.append("")

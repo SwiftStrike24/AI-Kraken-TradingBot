@@ -218,7 +218,8 @@ Generate a JSON response with trades and thesis.
         self.assertIn("response_format", request)
         
         # Check specific values
-        self.assertEqual(request["model"], "gpt-4o")
+        from bot.openai_config import get_default_openai_model
+        self.assertEqual(request["model"], get_default_openai_model())
         self.assertEqual(request["response_format"], {"type": "json_object"})
         self.assertIsInstance(request["messages"], list)
         self.assertEqual(len(request["messages"]), 1)

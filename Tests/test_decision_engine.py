@@ -89,8 +89,9 @@ class TestDecisionEngine(unittest.TestCase):
         # Assertions
         self.engine._get_context.assert_called_once()
         self.engine._build_prompt.assert_called_once_with({"portfolio": "mock portfolio", "thesis": "mock thesis"})
+        from bot.openai_config import get_default_openai_model
         mock_openai_instance.chat.completions.create.assert_called_once_with(
-            model="gpt-4o",
+            model=get_default_openai_model(),
             messages=[{"role": "user", "content": "mock prompt"}],
             response_format={"type": "json_object"}
         )

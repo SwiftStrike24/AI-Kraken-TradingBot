@@ -213,7 +213,7 @@ class PromptEngine:
             raise PromptEngineError(f"Failed to build prompt: {e}")
     
     def build_openai_request(self, portfolio_context: str, research_report: str, 
-                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str = "gpt-4o", performance_review: str = "", rejected_trades_review: str = "", historical_reflection: str = "", refinement_context: Optional[str] = None) -> dict:
+                           last_thesis: str, coingecko_data: str = "", trading_rules: str = "", model: str | None = None, performance_review: str = "", rejected_trades_review: str = "", historical_reflection: str = "", refinement_context: Optional[str] = None) -> dict:
         """
         Build complete OpenAI API request object with proper system/user message separation.
         
@@ -245,6 +245,14 @@ class PromptEngine:
         
         messages.append({"role": "user", "content": user_content})
         
+        # Resolve default model if not provided
+        if model is None:
+            try:
+                from bot.openai_config import get_default_openai_model
+                model = get_default_openai_model()
+            except Exception:
+                model = "gpt-5-2025-08-07"
+
         request = {
             "model": model,
             "messages": messages,

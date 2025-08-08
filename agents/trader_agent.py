@@ -24,11 +24,11 @@ class TraderAgent(BaseAgent):
     """
     The Trader-AI specializes in AI execution and decision parsing.
     
-    This agent:
-    1. Receives optimized prompt payloads from the Strategist-AI
-    2. Executes calls to OpenAI's GPT-4o model
-    3. Parses and validates the AI's trading decisions
-    4. Provides structured trade plans to the execution system
+            This agent:
+        1. Receives optimized prompt payloads from the Strategist-AI
+        2. Executes calls to OpenAI's GPT-5 (env-configurable with fallback)
+        3. Parses and validates the AI's trading decisions
+        4. Provides structured trade plans to the execution system
     """
     
     def __init__(self, logs_dir: str = "logs", session_dir: str = None):
@@ -110,9 +110,9 @@ class TraderAgent(BaseAgent):
         prompt_text = prompt_payload.get('prompt_text', '')
         
         # Configure model parameters (can be overridden by supervisor directives)
-        model = directives.get('model', 'gpt-4o')
+        from bot.openai_config import get_default_openai_model
+        model = directives.get('model', get_default_openai_model())
         temperature = directives.get('temperature', 0.1)  # Low temperature for consistent trading decisions
-        max_tokens = directives.get('max_tokens', 1000)
         
         try:
             self.logger.info(f"Calling OpenAI API with model: {model}")
@@ -139,19 +139,20 @@ class TraderAgent(BaseAgent):
             messages.append({"role": "user", "content": user_content})
             
             # Make the API call with proper message structure
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
+            response = self._call_openai_with_fallback(messages, temperature)
             
             # Extract response content
             response_content = response.choices[0].message.content
             
             self.logger.info("OpenAI API call completed successfully")
             self.logger.debug(f"Response length: {len(response_content)} characters")
+            try:
+                usage = getattr(response, "usage", None)
+                if usage:
+                    self.logger.info(f"OpenAI usage: prompt={usage.prompt_tokens} completion={usage.completion_tokens} total={usage.total_tokens}")
+                self.logger.info(f"OpenAI finish_reason: {response.choices[0].finish_reason}")
+            except Exception:
+                pass
             
             return {
                 "content": response_content,
@@ -171,6 +172,37 @@ class TraderAgent(BaseAgent):
             self.logger.error(f"Unexpected error during AI call: {e}")
             raise
     
+    def _call_openai_with_fallback(self, messages: list, temperature: float):
+        """Call OpenAI with the default model, retry once with fallback on failure or bad JSON."""
+        from bot.openai_config import get_default_openai_model, get_fallback_openai_model, build_chat_completion_params
+        models_to_try = [get_default_openai_model(), get_fallback_openai_model()]
+        last_error = None
+        for mdl in models_to_try:
+            try:
+                self.logger.info(f"Calling OpenAI model={mdl} temp={temperature}")
+                params = build_chat_completion_params(
+                    model=mdl,
+                    messages=messages,
+                    temperature=temperature,
+                    response_format={"type": "json_object"},
+                )
+                resp = self.openai_client.chat.completions.create(**params)
+                # Quick JSON validation to ensure we got json_object
+                content = resp.choices[0].message.content or ""
+                try:
+                    json.loads(content)
+                    return resp
+                except Exception as parse_err:
+                    self.logger.warning(f"JSON parse failed on model={mdl}: {parse_err}")
+                    last_error = parse_err
+                    continue
+            except Exception as e:
+                self.logger.warning(f"OpenAI call failed on model={mdl}: {e}")
+                last_error = e
+                continue
+        # If we reach here both attempts failed
+        raise last_error
+
     def _parse_ai_response(self, ai_response: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse and validate the AI's trading decision response.
