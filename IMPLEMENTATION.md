@@ -8,6 +8,11 @@ The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
   
+  **📣 Telegram Trade Alerts (August 12, 2025) — IMPLEMENTED ✅**
+  - Added aggregated Telegram trade alerts per cycle with optional HOLD notifications.
+  - Env: TELEGRAM_TRADE_ALERTS=1, TELEGRAM_ALERTS_INCLUDE_HOLD=0/1, TELEGRAM_ALERTS_PARSE_MODE, TELEGRAM_ALERTS_SILENT, TELEGRAM_ALERTS_MAXLEN.
+  - Files: `agents/supervisor_agent.py` (send sites), `bot/telegram_alerter.py` (helpers, HTTP fallback).
+  
   **💵 Cash Buffer Policy Update (August 12, 2025) — IMPLEMENTED ✅**
   - Change: For portfolios >$50, reduce required cash buffer from 5% to 1% to maximize invested capital.
   - Prompt: `bot/prompt_template.md` updated: “maintain 1% cash buffer”.

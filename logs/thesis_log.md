@@ -100,3 +100,39 @@ Market tone is cautiously bullish with ETH leading but alt rotation accelerating
 
 ---
 
+## Thesis for 2025-08-08 23:43:07 UTC
+
+With BTC range-bound and ETH strength persisting above $4k, we rotate from AERO—after a sharp +24% 24h surge and elevated mean-reversion risk—into SUI, which benefits from institutional access expansion and constructive momentum toward $4. This preserves ETH exposure (35%) and DOGE beta (27%) amid falling BTC dominance while adding a high-conviction leader (SUI 35%) for potential alpha versus BTC/ETH. Both orders clear Kraken minimums and the $25 micro-trade guard, keep per-position exposure under 40%, and retain a >1% cash buffer, aligning with a disciplined, liquidity-aware rotation framework.
+
+---
+
+## Thesis for 2025-08-08 23:51:54 UTC
+
+Market breadth favors an ETH‑led alt rotation, with institutional headlines and a hidden ETH breadth signal supporting momentum to 4.2–4.4k, while SUI holds relative strength and SOL offers a tactical catch‑up toward 185–190. To maximize alpha vs BTC/ETH under constraints, we rotate out of extended DOGE into SOL and elevate ETH to a 40% core using a sell‑and‑rebuy (required to meet the $25 min‑ticket). The resulting mix concentrates exposure in high‑conviction leaders (ETH, SUI) and a laggard setup (SOL), maintains a ≥1% cash buffer, respects the 40% per‑position cap, and passes order‑min checks (e.g., SOL buy ≈$25.0 > ordmin, ETH buy ≈$43.0 > ordmin). This rotation tightens alignment with prevailing flows and momentum while managing execution and sizing risks.
+
+---
+
+## Thesis for 2025-08-09 00:03:43 UTC
+
+Market tone is moderately bullish with ETH leadership (+44.5%/30d), alt outperformance (DOGE/XRP/SUI), and supportive institutional signals (e.g., Harvard’s IBIT stake), but with BTC range-bound and macro/regulatory overhangs. However, with only $10 equity, the Micro-Trade Guard requires a ≥$25 notional per order, making any trade impossible today despite Kraken’s ordermins (e.g., XETHZUSD min ≈$8.02). Mandatory pre-calculation confirms that even a 95% allocation ($9.50) cannot meet the ≥$25 notional threshold, so we must hold cash. Once equity/funding ≥$25, I will execute a single high-conviction, limit-only buy in XETHZUSD on a breakout/hold above 4,050 targeting 4,300 with OCO (1R SL, 2R TP), adhering to small-account guardrails (whitelist BTC/ETH/SOL, liquidity gates, and max single-position mandate) to pursue alpha versus BTC/ETH benchmarks.
+
+---
+
+## Thesis for 2025-08-09 00:10:53 UTC
+
+With BTC range-bound and ETH leading an alt rotation (ETH +44% 30d, target 4.2–4.4k) while DOGE trends strongly above $0.22, we rotate tactically into higher-beta DOGE for near-term outperformance and keep ETH at a 40% ballast for benchmark control. SUI retains institutional support but is already near our alt cap; thus we deploy cash to DOGE and slightly rebalance ETH to comply with the 40% max and ≥1% cash buffer. This aligns with today’s neutral-to-bullish tone, prioritizing momentum-driven alt rotation for alpha while respecting strict sizing and execution guardrails.
+
+---
+
+## Thesis for 2025-08-09 00:54:59 UTC
+
+Market tone is moderately bullish with ETH-led breadth and institutional support for BTC, while key breakout triggers (ETH >4,050–4,100; SUI >3.95–4.00; DOGE >0.24–0.25) are close but not confirmed. To maximize alpha versus BTC/ETH under tight execution rules, we rotate out of SUI and DOGE (sub-trigger, higher tail risk) into a concentrated majors mix: SOL for upside capture near the 180 pivot and BTC for institutional-backed ballast, while trimming ETH to respect the 40% cap and to fund two >=$25 buys. This allocation aligns with the process guardrails (whitelist USD spot BTC/ETH/SOL, liquidity, and position limits), maintains >1% cash, and positions the portfolio to benefit from an alt-led continuation while controlling downside if headlines or macro volatility re-emerge.
+
+---
+
+## Thesis for 2025-08-09 01:12:56 UTC
+
+Market tone is moderately bullish with rotation into large-cap alts as ETH leads above 4,000 while BTC steadies and SOL needs a decisive close >180. We are executing an altcoin rotation: trimming SOL (sub-breakout) and BTC (slightly above the 40% cap) to fund higher-conviction alts—SUI on institutional access momentum and XRP benefiting from easing BTC dominance. Each order exceeds the $25 micro-trade threshold and Kraken minimums, keeps every position ≤40%, preserves >1% cash, and aligns with the current regime favoring selective large-cap alts for alpha versus BTC/ETH.
+
+---
+

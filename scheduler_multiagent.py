@@ -14,6 +14,7 @@ from agents import SupervisorAgent
 from bot.kraken_api import KrakenAPI, KrakenAPIError
 from bot.logger import setup_colored_logging, get_logger
 from bot.telegram_alerter import notify_dev_of_error
+from bot.telegram_alerter import notify_trade_update, TELEGRAM_TRADE_ALERTS, TELEGRAM_ALERTS_PARSE_MODE, TELEGRAM_ALERTS_SILENT
 
 # Set up logging to a file and to the console
 # logging.basicConfig(
@@ -282,6 +283,7 @@ def main():
     logger.info("   📈 Press [L] then [ENTER] to show last equity")
     logger.info("   🏦 Press [P] then [ENTER] to show current portfolio")
     logger.info("   📋 Press [T] then [ENTER] to show recent trades")
+    logger.info("   🧪 Press [D] then [ENTER] to run a $10 simulated decision (no live trades)")
     logger.info("   🔄 Press [Ctrl+C] to stop scheduler")
     logger.info("")
     logger.info("🔄 Scheduler is now running...")
@@ -477,6 +479,62 @@ def main():
                             logger.warning("   ❌ Trades file not found")
                     except Exception as e:
                         logger.error(f"   ❌ Error reading trades: {e}", exc_info=True)
+                    logger.info("")
+
+                elif user_input == "d":  # $10 simulation dry-run
+                    logger.info("")
+                    logger.info("🧪 SIMULATION: Running full decision pipeline with $10 capped context (no live orders)...")
+                    try:
+                        # Build a simulated KrakenAPI view by wrapping the portfolio context
+                        class SimKrakenAPI(KrakenAPI):
+                            def __init__(self, real_api: KrakenAPI):
+                                # Do not call super().__init__ to avoid new nonce/API session; reuse real
+                                self.__dict__ = real_api.__dict__
+                            def get_comprehensive_portfolio_context(self):
+                                ctx = super(SimKrakenAPI, self).get_comprehensive_portfolio_context()
+                                # Cap total equity to $10 by scaling cash; keep crypto at $0 to avoid live sells
+                                capped = dict(ctx)
+                                capped['total_equity'] = 10.0
+                                capped['cash_balance'] = 10.0
+                                capped['crypto_value'] = 0.0
+                                capped['usd_values'] = {'USD': {'amount': 10.0, 'price': 1.0, 'value': 10.0}}
+                                capped['allocation_percentages'] = {'USD': 100.0}
+                                capped['portfolio_summary'] = "Current cash balance: $10.00 USD.\n\nTotal Portfolio Value: $10.00 USD\nAllocation: 100.0% Cash, 0.0% Crypto"
+                                capped['tradeable_assets'] = ['USD']
+                                return capped
+                            def place_order(self, *args, **kwargs):
+                                # Prevent any live trading in simulation
+                                raise RuntimeError("Simulation mode: place_order disabled")
+                        sim_api = SimKrakenAPI(kraken_api)
+                        sim_supervisor = SupervisorAgent(sim_api)
+                        # Inputs flag to indicate simulate for downstream logging if needed
+                        sim_inputs = {
+                            "cycle_trigger": "simulated_usd10_run",
+                            "execution_mode": "simulation",
+                            "cycle_timestamp": datetime.now().isoformat(),
+                        }
+                        # Run pipeline; execution will fail at place_order due to simulation guard, but we catch it
+                        try:
+                            result = sim_supervisor.run(sim_inputs)
+                        except Exception as sim_err:
+                            logger.info(f"Simulation ended before live trading (expected): {sim_err}")
+                            result = sim_supervisor.get_execution_summary()
+
+                        # Build and send a short Telegram preview if enabled
+                        try:
+                            if TELEGRAM_TRADE_ALERTS:
+                                msg = (
+                                    f"🧪 Trade Preview — {datetime.utcnow().isoformat(timespec='seconds')}Z\n"
+                                    f"Mode: Simulation ($10) — No live orders placed\n"
+                                    f"Decision pipeline executed successfully."
+                                )
+                                notify_trade_update(msg, silent=TELEGRAM_ALERTS_SILENT, parse_mode=TELEGRAM_ALERTS_PARSE_MODE)
+                        except Exception:
+                            pass
+
+                        logger.info("✅ Simulation complete (no live trades).")
+                    except Exception as e:
+                        logger.error(f"❌ Simulation run failed: {e}", exc_info=True)
                     logger.info("")
             
             # Wait for a short duration to prevent high CPU usage

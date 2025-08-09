@@ -27,6 +27,8 @@ from .reflection_agent import ReflectionAgent
 from bot.kraken_api import KrakenAPI
 from bot.trade_executor import TradeExecutor
 from bot.performance_tracker import PerformanceTracker
+from bot.telegram_alerter import notify_trade_update, TELEGRAM_TRADE_ALERTS, TELEGRAM_ALERTS_INCLUDE_HOLD, TELEGRAM_ALERTS_PARSE_MODE, TELEGRAM_ALERTS_SILENT
+from zoneinfo import ZoneInfo
 
 # logger = logging.getLogger(__name__)
 
@@ -1077,6 +1079,26 @@ class SupervisorAgent(BaseAgent):
             }
             # Persist for summary
             self.execution_context["trade_execution"] = result
+            # Telegram HOLD alert (not approved)
+            try:
+                if TELEGRAM_TRADE_ALERTS and TELEGRAM_ALERTS_INCLUDE_HOLD:
+                    pnl_summary = ""
+                    try:
+                        pnl_summary = self.performance_tracker.get_pnl_summary(3)
+                    except Exception:
+                        pnl_summary = ""
+                    msg = (
+                        f"🤝 Trade Update — {datetime.utcnow().isoformat(timespec='seconds')}Z\n"
+                        f"Decision: HOLD — Plan not approved\n"
+                        f"Reason: {approval_decision.get('approval_reason', 'N/A')[:350]}\n"
+                        f"{pnl_summary}"
+                    ).strip()
+                    self.logger.info("Sending Telegram HOLD (not approved) alert…")
+                    notify_trade_update(msg, silent=TELEGRAM_ALERTS_SILENT, parse_mode=TELEGRAM_ALERTS_PARSE_MODE)
+                else:
+                    self.logger.info("Telegram trade alerts skipped (toggle or HOLD disabled)")
+            except Exception as _e:
+                self.logger.warning(f"HOLD alert send skipped due to error: {_e}")
             return result
         
         try:
@@ -1094,6 +1116,25 @@ class SupervisorAgent(BaseAgent):
                     "execution_timestamp": datetime.now().isoformat()
                 }
                 self.execution_context["trade_execution"] = result
+                # Telegram HOLD alert (approved but empty)
+                try:
+                    if TELEGRAM_TRADE_ALERTS and TELEGRAM_ALERTS_INCLUDE_HOLD:
+                        pnl_summary = ""
+                        try:
+                            pnl_summary = self.performance_tracker.get_pnl_summary(3)
+                        except Exception:
+                            pnl_summary = ""
+                        msg = (
+                            f"🤝 Trade Update — {datetime.utcnow().isoformat(timespec='seconds')}Z\n"
+                            f"Decision: HOLD — Approved but empty plan\n"
+                            f"{pnl_summary}"
+                        ).strip()
+                        self.logger.info("Sending Telegram HOLD (approved empty) alert…")
+                        notify_trade_update(msg, silent=TELEGRAM_ALERTS_SILENT, parse_mode=TELEGRAM_ALERTS_PARSE_MODE)
+                    else:
+                        self.logger.info("Telegram trade alerts skipped (toggle or HOLD disabled)")
+                except Exception as _e:
+                    self.logger.warning(f"HOLD alert send skipped due to error: {_e}")
                 return result
             
             # Execute trades using the existing trade executor
@@ -1126,6 +1167,124 @@ class SupervisorAgent(BaseAgent):
             self.logger.info(f"✅ Trade execution completed: {execution_summary['successful_trades']}/{execution_summary['total_trades']} successful")
             # Persist for summary
             self.execution_context["trade_execution"] = execution_summary
+
+            # Telegram trade summary alert (only on toggle)
+            try:
+                if TELEGRAM_TRADE_ALERTS:
+                    # Compose compact summary
+                    # Decision context
+                    try:
+                        overall_quality = final_decision.get("approval_decision", {}).get("quality_threshold_met")
+                        risk_level = final_decision.get("approval_decision", {}).get("risk_acceptable")
+                        approved_reason = final_decision.get("approval_decision", {}).get("approval_reason", "")
+                    except Exception:
+                        overall_quality, risk_level, approved_reason = None, None, ""
+
+                    # Human-readable Calgary time
+                    try:
+                        calgary_now = datetime.now(ZoneInfo("America/Edmonton"))
+                        nice_time = calgary_now.strftime("%b %d, %Y %I:%M:%S %p %Z")
+                    except Exception:
+                        nice_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+                    lines = []
+                    lines.append(f"🚀 Trade Update — {nice_time}")
+                    lines.append("Decision: APPROVED")
+                    succ = execution_summary.get('successful_trades', 0)
+                    total = execution_summary.get('total_trades', 0)
+                    lines.append(f"Executed: {succ}/{total} successful")
+                    if approved_reason:
+                        lines.append(f"Note: {approved_reason[:350]}")
+
+                    # CoinGecko price map by symbol (uppercase) from earlier agent output, if available
+                    cg_price_by_symbol = {}
+                    try:
+                        cg_market = self.execution_context.get("agent_outputs", {}).get("coingecko", {}).get("market_data", {})
+                        for _, entry in (cg_market or {}).items():
+                            sym = str(entry.get('symbol', '')).upper()
+                            px = entry.get('current_price')
+                            if sym and isinstance(px, (int, float)) and px > 0:
+                                cg_price_by_symbol[sym] = float(px)
+                    except Exception:
+                        cg_price_by_symbol = {}
+
+                    # Helper to map Kraken base assets to CoinGecko symbols
+                    def _to_cg_symbol_from_pair(p: str) -> str | None:
+                        try:
+                            details = self.kraken_api.get_pair_details(p) or {}
+                            base = details.get('base')
+                            if not base:
+                                return None
+                            # Clean X/Z prefixes
+                            if base.startswith(('X','Z')) and len(base) > 1:
+                                base = base[1:]
+                            # Kraken-specific symbol remaps
+                            remaps = {"XBT": "BTC", "XDG": "DOGE"}
+                            base = remaps.get(base, base)
+                            return base.upper()
+                        except Exception:
+                            return None
+
+                    # Price map for USD amounts (single fetch)
+                    try:
+                        success_pairs = [r.get('trade', {}).get('pair') for r in trade_results if r.get('status') == 'success']
+                        success_pairs = [p for p in success_pairs if p]
+                        prices_map = {}
+                        if success_pairs:
+                            prices_map = self.kraken_api.get_ticker_prices(list(set(success_pairs))) or {}
+                    except Exception:
+                        prices_map = {}
+
+                    # Per-trade successes only (with ~$USD)
+                    for r in trade_results:
+                        if r.get('status') == 'success':
+                            t = r.get('trade', {})
+                            action = str(t.get('action', '')).upper()
+                            pair = t.get('pair', 'N/A')
+                            volume = float(t.get('volume', 0) or 0)
+                            emoji = '🟢' if action == 'BUY' else ('🔴' if action == 'SELL' else '🔹')
+                            # Determine price: prefer CoinGecko by symbol, fallback to Kraken ticker, then estimated
+                            price = None
+                            try:
+                                cg_sym = _to_cg_symbol_from_pair(pair)
+                                if cg_sym and cg_sym in cg_price_by_symbol:
+                                    price = cg_price_by_symbol.get(cg_sym)
+                                if not price:
+                                    price = prices_map.get(pair, {}).get('price')
+                                if not price:
+                                    price = t.get('estimated_price')
+                            except Exception:
+                                price = None
+                            usd_str = ""
+                            if isinstance(price, (int, float)) and price > 0:
+                                usd_amount = volume * price
+                                usd_str = f" (~${usd_amount:,.2f})"
+                            lines.append(f"{emoji} {action} {pair} {volume:.8f}{usd_str}")
+
+                    # Portfolio snapshot
+                    try:
+                        ctx = self.kraken_api.get_comprehensive_portfolio_context()
+                        lines.append(
+                            f"Portfolio: ${ctx.get('total_equity', 0):,.2f} | Cash ${ctx.get('cash_balance', 0):,.2f} | Crypto ${ctx.get('crypto_value', 0):,.2f}"
+                        )
+                    except Exception:
+                        pass
+
+                    # Short P&L summary
+                    try:
+                        pnl_summary = self.performance_tracker.get_pnl_summary(3)
+                        if pnl_summary:
+                            lines.append(pnl_summary)
+                    except Exception:
+                        pass
+
+                    msg = "\n".join(lines)
+                    self.logger.info("Sending Telegram trade summary alert…")
+                    notify_trade_update(msg, silent=TELEGRAM_ALERTS_SILENT, parse_mode=TELEGRAM_ALERTS_PARSE_MODE)
+                else:
+                    self.logger.info("Telegram trade alerts skipped (toggle off)")
+            except Exception as _e:
+                self.logger.warning(f"Trade alert send skipped due to error: {_e}")
             return execution_summary
             
         except Exception as e:

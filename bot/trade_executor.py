@@ -21,6 +21,61 @@ class TradeExecutor:
         """
         self.kraken_api = kraken_api
 
+    def _consolidate_trades(self, trades: list, portfolio_value: float) -> tuple[list, list]:
+        """
+        Consolidate multiple BUY/SELL actions on the same pair into a single net action to avoid
+        redundant sell-then-buy of the same asset (minimizes fees).
+
+        Returns:
+            (consolidated_sell_trades, consolidated_buy_trades)
+        """
+        net_by_pair: dict[str, dict] = {}
+        price_by_pair: dict[str, float] = {}
+
+        for trade in trades:
+            try:
+                # Determine normalized pair and volume
+                if 'allocation_percentage' in trade:
+                    converted = self._convert_percentage_to_volume(trade, portfolio_value)
+                    pair = self._normalize_pair(converted['pair'])
+                    volume = float(converted['volume'])
+                    est_price = float(converted.get('estimated_price') or 0.0)
+                else:
+                    pair = self._normalize_pair(trade['pair'])
+                    volume = float(trade['volume'])
+                    volume = self._round_volume_for_pair(pair, volume)
+                    # Try to fetch a price for approximate USD computations later
+                    try:
+                        px = self.kraken_api.get_ticker_prices([pair]).get(pair, {}).get('price', 0.0)
+                        est_price = float(px or 0.0)
+                    except Exception:
+                        est_price = 0.0
+
+                action = str(trade.get('action', '')).lower()
+                signed = volume if action == 'buy' else (-volume if action == 'sell' else 0.0)
+                if pair not in net_by_pair:
+                    net_by_pair[pair] = {'net_volume': 0.0}
+                net_by_pair[pair]['net_volume'] += signed
+                if est_price and est_price > 0:
+                    price_by_pair[pair] = est_price
+            except Exception:
+                # Skip malformed trade entries; downstream validation will handle plan integrity
+                continue
+
+        # Build consolidated lists
+        sells: list = []
+        buys: list = []
+        for pair, data in net_by_pair.items():
+            net_vol = float(data.get('net_volume') or 0.0)
+            if abs(net_vol) <= 0.0:
+                continue
+            if net_vol < 0:
+                sells.append({'pair': pair, 'action': 'sell', 'volume': abs(self._round_volume_for_pair(pair, -net_vol)), 'estimated_price': price_by_pair.get(pair, 0.0)})
+            else:
+                buys.append({'pair': pair, 'action': 'buy', 'volume': self._round_volume_for_pair(pair, net_vol), 'estimated_price': price_by_pair.get(pair, 0.0)})
+
+        return sells, buys
+
     def _round_volume_for_pair(self, pair: str, volume: float) -> float:
         """
         Round the volume to meet Kraken's precision rules for the given pair.
@@ -264,10 +319,9 @@ class TradeExecutor:
         if not all_trades:
             logger.info("Trade plan is empty. No trades to execute.")
             return results
-        
-        # Separate buys and sells
-        sell_trades = [t for t in all_trades if t.get('action', '').lower() == 'sell']
-        buy_trades = [t for t in all_trades if t.get('action', '').lower() == 'buy']
+        # Consolidate opposing actions for the same pair to minimize fee churn
+        portfolio_value = self._calculate_portfolio_value()
+        sell_trades, buy_trades = self._consolidate_trades(all_trades, portfolio_value)
 
         # --- Phase 1: Execute Sell Orders First ---
         sell_txids: list[str] = []
