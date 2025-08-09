@@ -8,7 +8,15 @@ The strategy is experimental, transparent, and performance-logged.
 
 ## ⚡ Latest Enhancements (August 2025)
   
-  **📣 Telegram Trade Alerts (August 12, 2025) — IMPLEMENTED ✅**
+  **⏸️ Explicit HOLD Decisions with Reasoning (August 12, 2025) — IMPLEMENTED ✅**
+  - Change: AI output schema expanded to include a top-level `holds` array for assets kept without trading.
+  - Prompt: `bot/prompt_template.md` updated to require explicit holds with `pair`, `confidence_score`, and `reasoning`, plus optional `current_allocation_percentage`.
+  - Parsing: `agents/trader_agent.py` now validates and returns `holds` alongside `trades` (execution ignores holds).
+  - Alerts: `agents/supervisor_agent.py` includes a “Holds” section in Telegram summaries when `TELEGRAM_ALERTS_INCLUDE_HOLD=1`.
+  - Observability: Added logs indicating presence/count of holds in AI decisions and whether alerts include them.
+  - Impact: Transparent documentation of why certain positions are maintained; improved auditability and robustness without changing execution behavior.
+  
+   **📣 Telegram Trade Alerts (August 12, 2025) — IMPLEMENTED ✅**
   - Added aggregated Telegram trade alerts per cycle with optional HOLD notifications.
   - Env: TELEGRAM_TRADE_ALERTS=1, TELEGRAM_ALERTS_INCLUDE_HOLD=0/1, TELEGRAM_ALERTS_PARSE_MODE, TELEGRAM_ALERTS_SILENT, TELEGRAM_ALERTS_MAXLEN.
   - Files: `agents/supervisor_agent.py` (send sites), `bot/telegram_alerter.py` (helpers, HTTP fallback).

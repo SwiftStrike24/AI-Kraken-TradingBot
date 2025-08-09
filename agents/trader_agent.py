@@ -75,6 +75,12 @@ class TraderAgent(BaseAgent):
             
             # Parse and validate the response
             parsed_decision = self._parse_ai_response(ai_response)
+            try:
+                raw = parsed_decision.get('raw_decision', {}) if isinstance(parsed_decision, dict) else {}
+                if isinstance(raw, dict):
+                    self.logger.info(f"Raw AI decision contains holds key: {'holds' in raw} (len={len(raw.get('holds', []) or [])})")
+            except Exception:
+                pass
             
             # Assess decision quality
             decision_quality = self._assess_decision_quality(parsed_decision, prompt_payload)
@@ -246,8 +252,50 @@ class TraderAgent(BaseAgent):
             if not isinstance(thesis, str) or not thesis.strip():
                 raise ValueError("'thesis' field must be a non-empty string")
             
+            # Optional: parse holds
+            holds = decision.get('holds', [])
+            validated_holds = []
+            if isinstance(holds, list):
+                for j, h in enumerate(holds):
+                    try:
+                        pair = str(h.get('pair', '')).upper().strip()
+                        reasoning = str(h.get('reasoning', '')).strip()
+                        conf = float(h.get('confidence_score', 0))
+                        cap = h.get('current_allocation_percentage', None)
+                        if not pair:
+                            raise ValueError("missing pair")
+                        if not reasoning:
+                            raise ValueError("missing reasoning")
+                        if not (0.1 <= conf <= 1.0):
+                            raise ValueError("confidence_score out of range")
+                        if cap is not None:
+                            try:
+                                cap = float(cap)
+                                if not (0.0 <= cap <= 1.0):
+                                    cap = None
+                            except Exception:
+                                cap = None
+                        validated_holds.append({
+                            'pair': pair,
+                            'confidence_score': conf,
+                            'reasoning': reasoning,
+                            'current_allocation_percentage': cap
+                        })
+                    except Exception as e:
+                        self.logger.warning(f"Skipping invalid hold[{j}]: {e}")
+            else:
+                self.logger.info("No 'holds' provided by AI (optional)")
+
+            # Brief observability
+            try:
+                self.logger.info(f"AI decision keys: {list(decision.keys())}")
+                self.logger.info(f"AI trades count: {len(validated_trades)}; holds count: {len(validated_holds)}")
+            except Exception:
+                pass
+
             return {
                 "trades": validated_trades,
+                "holds": validated_holds,
                 "thesis": thesis.strip(),
                 "raw_decision": decision,
                 "validation_status": "passed",

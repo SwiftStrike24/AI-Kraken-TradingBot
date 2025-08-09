@@ -83,7 +83,7 @@ You are a world-class, professional-grade crypto portfolio strategist. Your sole
 </CONSTRAINTS>
 
 <TASK>
-Based on all the provided context and constraints, generate your trading plan for today. Your response must be a JSON object with three keys: "trades", "strategy", and "thesis".
+Based on all the provided context and constraints, generate your trading plan for today. Your response must be a JSON object with four keys: "trades", "holds", "strategy", and "thesis".
 
 - The "trades" key must contain a list of trade objects. Each object must have:
   * "pair" (string, e.g., "ETHUSD"): The trading pair
@@ -109,9 +109,17 @@ Your "trades" array should contain:
 - One buy order for `Asset B`/USD with allocation_percentage: 0.50  
 - One buy order for `Asset C`/USD with allocation_percentage: 0.40
 
+- The "holds" key must contain a list of hold objects for assets you choose to maintain (no trade). For each currently held, tradeable asset not included in "trades", you MUST include a hold object with:
+  * "pair" (string, e.g., "ETHUSD")
+  * "confidence_score" (float): 0.1–1.0 reflecting conviction to hold
+  * "reasoning" (string): Brief justification for holding (market conditions, asset performance, and portfolio strategy alignment)
+  * "current_allocation_percentage" (float, optional): Current allocation to aid reporting
+
 - The "strategy" key must contain the chosen trading strategy name (e.g., "MOMENTUM_TRADING", "MEAN_REVERSION", "ALTCOIN_ROTATION", "DEFENSIVE_HOLDING").
 
-- The "thesis" key must contain a one-paragraph string explaining your strategic reasoning, chosen strategy justification, and how trades align with current market conditions.
+- The "thesis" key must contain a one-paragraph string explaining your strategic reasoning, chosen strategy justification, and how trades and holds align with current market conditions.
+
+Important: Do NOT place any "hold" items inside the "trades" array. Holds are informational only and must be listed under "holds".
 </TASK>
 
 <EXAMPLE>
@@ -132,7 +140,15 @@ Your "trades" array should contain:
         "reasoning": "Taking profits after recent gains, rotating to stronger opportunities"
       }}
     ],
+    "holds": [
+      {{
+        "pair": "XXBTZUSD",
+        "confidence_score": 0.7,
+        "reasoning": "Dominance stable; maintain core BTC exposure within risk caps.",
+        "current_allocation_percentage": 0.16
+      }}
+    ],
     "strategy": "ALTCOIN_ROTATION",
-    "thesis": "Implementing altcoin rotation strategy based on diverging fundamentals. Ethereum shows exceptional institutional adoption with regulatory tailwinds, while Solana's recent outperformance creates profit-taking opportunity. The 35% ETH allocation reflects high confidence in regulatory clarity, while 15% SOL reduction manages exposure during uncertain market conditions. This rotation optimizes for medium-term alpha generation while maintaining balanced risk exposure."
+    "thesis": "Implementing altcoin rotation strategy based on diverging fundamentals. Ethereum shows exceptional institutional adoption with regulatory tailwinds, while Solana's recent outperformance creates profit-taking opportunity. Maintaining a core BTC position as dominance steadies. The allocations preserve cash buffer rules and align with the current regime favoring selective large-cap alts for alpha versus BTC/ETH."
   }}
 </EXAMPLE>

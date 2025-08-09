@@ -1195,6 +1195,13 @@ class SupervisorAgent(BaseAgent):
                     lines.append(f"Executed: {succ}/{total} successful")
                     if approved_reason:
                         lines.append(f"Note: {approved_reason[:350]}")
+ 
+                    # Holds observability (count and toggle)
+                    holds_list = self.execution_context.get("agent_outputs", {}).get("trader", {}).get("trading_plan", {}).get("holds", [])
+                    try:
+                        self.logger.info(f"Holds in plan: {len(holds_list)}; include_hold_toggle={TELEGRAM_ALERTS_INCLUDE_HOLD}")
+                    except Exception:
+                        pass
 
                     # CoinGecko price map by symbol (uppercase) from earlier agent output, if available
                     cg_price_by_symbol = {}
@@ -1260,6 +1267,21 @@ class SupervisorAgent(BaseAgent):
                                 usd_amount = volume * price
                                 usd_str = f" (~${usd_amount:,.2f})"
                             lines.append(f"{emoji} {action} {pair} {volume:.8f}{usd_str}")
+
+                    # Include Holds section if toggled and holds available
+                    try:
+                        if TELEGRAM_ALERTS_INCLUDE_HOLD and holds_list:
+                            lines.append("—")
+                            lines.append("⏸️ Holds (no orders placed):")
+                            # Optional: show up to 6 to avoid long messages
+                            for h in holds_list[:6]:
+                                hp = h.get('pair', 'N/A')
+                                cap = h.get('current_allocation_percentage', None)
+                                cap_str = f" ({cap*100:.1f}%)" if isinstance(cap, (int, float)) else ""
+                                rsn = h.get('reasoning', '')
+                                lines.append(f"⏸️ HOLD {hp}{cap_str} — {rsn}")
+                    except Exception:
+                        pass
 
                     # Portfolio snapshot
                     try:
